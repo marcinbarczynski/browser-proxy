@@ -10,13 +10,50 @@ Open a Slack link → `browser-proxy` decides whether it goes to Chrome, Firefox
 Inspired by [Finicky](https://github.com/johnste/finicky), but cross-platform
 and statically declared in TOML rather than JS.
 
-## Build
+## Install
+
+One-line install of the latest release for your OS/arch:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/browser-proxy/main/install.sh | sh
+```
+
+The script picks `linux-amd64`, `linux-arm64`, `darwin-amd64` or `darwin-arm64`
+automatically and drops the binary into `/usr/local/bin` (or `~/.local/bin` if
+that's not writable). On macOS it strips the quarantine attribute so the
+binary runs without a Gatekeeper dialog.
+
+Pin a specific version or override the destination via env vars:
+
+```sh
+BROWSER_PROXY_VERSION=v0.5.0 \
+BROWSER_PROXY_DEST=$HOME/bin \
+  curl -fsSL https://raw.githubusercontent.com/maxischmaxi/browser-proxy/main/install.sh | sh
+```
+
+### Manual install
+
+Download the asset for your platform from the
+[releases page](https://github.com/maxischmaxi/browser-proxy/releases),
+verify, and put it on your PATH:
+
+```sh
+# pick the right line for your machine
+ASSET=browser-proxy-linux-amd64    # or linux-arm64 / darwin-amd64 / darwin-arm64
+curl -fsSL -O "https://github.com/maxischmaxi/browser-proxy/releases/latest/download/${ASSET}"
+curl -fsSL -O "https://github.com/maxischmaxi/browser-proxy/releases/latest/download/SHA256SUMS"
+sha256sum -c SHA256SUMS --ignore-missing   # or `shasum -a 256 -c` on macOS
+chmod +x "${ASSET}" && sudo mv "${ASSET}" /usr/local/bin/browser-proxy
+```
+
+## Build from source
 
 ```sh
 go build -o browser-proxy ./cmd/browser-proxy
 ```
 
-macOS builds need a Mac (cgo + Cocoa). Linux builds run anywhere with Go ≥ 1.21.
+Requires Go ≥ 1.22. Linux builds run anywhere; macOS builds need a Mac
+(cgo + Cocoa for the Apple-Event handler).
 
 ## Use
 
@@ -40,7 +77,14 @@ macOS builds need a Mac (cgo + Cocoa). Linux builds run anywhere with Go ≥ 1.2
 ## Config
 
 `~/.config/browser-proxy/config.toml`. First matching rule wins; if no rule
-matches, `default` is used. Exactly one matcher per rule.
+matches, `default` is used. Each rule must set at least one constraint:
+
+- **One** URL matcher: `prefix` | `suffix` | `regex` | `host` (mutually exclusive)
+- And/or `source`: the app that opened the link
+- `browser` (required)
+- Optional `profile` (Chromium-likes and Firefox only)
+
+When both a URL matcher and `source` are set, both must match (AND).
 
 ```toml
 default = "Google Chrome"
@@ -60,13 +104,137 @@ browser = "Google Chrome"
 [[rules]]
 suffix = ".pdf"                    # case-insensitive, tested against URL path
 browser = "Preview"
+
+# Every link clicked from Slack opens in Chrome — regardless of URL.
+[[rules]]
+source = "Slack"
+browser = "Google Chrome"
+
+# Combined: docs.* links FROM Mail go to Safari.
+[[rules]]
+prefix = "https://docs."
+source = "Mail"
+browser = "Safari"
 ```
 
-`browser` can be:
+### `browser` values
 
 - **macOS**: an app name (`"Firefox"`) or a bundle ID (`"com.google.Chrome"`).
 - **Linux**: a binary name or absolute path (`"firefox"`, `/usr/bin/qutebrowser`),
   or a `.desktop` file name (`"firefox.desktop"`, launched via `gio launch`).
+
+### `source` values
+
+The originating app. Matching is case-insensitive.
+
+- **macOS**: app name (`"Slack"`, `"Mail"`) **or** bundle ID
+  (`"com.tinyspeck.slackmacgap"`). The dot-bearing form is interpreted as a
+  bundle ID; everything else as `localizedName`.
+- **Linux**: process name (`comm`) of the first non-launcher ancestor of this
+  binary. Bundle IDs have no meaning here. Detection works best for apps that
+  invoke `xdg-open`/`gio launch` directly; sandboxed/portal-based launches may
+  produce no source.
+
+Use `browser-proxy test -source <name> <url>` to dry-run rules with a
+simulated source app.
+
+### `profile` values
+
+Chrome and Firefox each store profiles differently — `browser-proxy` translates
+the spec into the right launch flag automatically.
+
+**Chromium family** (Chrome, Chromium, Brave, Edge, Vivaldi, Opera, Arc, Thorium, …)
+
+Translates to `--profile-directory=<dir>`. The spec can be either:
+
+- the **directory name** as Chrome stores it (`"Default"`, `"Profile 1"`, …), or
+- the **display name** you chose in Chrome (`"Work"`, `"Personal"`, …) — looked
+  up in the browser's `Local State` JSON and resolved to the directory name.
+
+Display-name lookup is case-insensitive. If lookup fails (no `Local State`
+found, or no match) the spec is passed through unchanged so non-standard
+installs still work.
+
+**Firefox family** (Firefox, LibreWolf, Waterfox, Tor Browser, Zen, …)
+
+Translates to `-P "<name>" --new-instance`. The spec is the profile name shown
+in `about:profiles` / Firefox's profile manager. `--new-instance` is added
+automatically because `-P` is otherwise silently ignored when Firefox is
+already running with another profile.
+
+**Other browsers** (Safari, qutebrowser, …)
+
+`profile` is ignored with a stderr warning. Safari profiles (Sonoma+) have no
+public CLI flag.
+
+**Caveat — `.desktop` files on Linux**
+
+When `browser` ends in `.desktop`, launching goes through `gio launch`, which
+can't forward extra flags. `profile` is dropped with a warning. Use a binary
+name (`firefox`, `google-chrome`) if you need profile targeting.
+
+## URL rewrites
+
+Rewrites are applied to the incoming URL **before** routing — so rules can
+match the rewritten form. Three layers are run in order: `force_https` →
+`strip_params` → `[[rewrites]]`.
+
+```toml
+# Upgrade every http:// to https:// before matching the rules.
+force_https = true
+
+# Drop tracking parameters from every URL. Trailing "*" = prefix wildcard.
+strip_params = ["utm_*", "fbclid", "gclid", "mc_cid", "ref"]
+
+# Hostname swap (preserves port, supports "*." wildcard).
+[[rewrites]]
+host = "twitter.com"
+replacement_host = "nitter.net"
+
+[[rewrites]]
+host = "*.youtube.com"
+replacement_host = "invidious.example"
+
+# Generic regex replace (Go re2 syntax; $1, $2 are backreferences).
+[[rewrites]]
+regex = "^https://www\\.google\\.com/search\\?q=(.+)$"
+replacement = "https://duckduckgo.com/?q=$1"
+```
+
+Each `[[rewrites]]` entry must use **either** `host` + `replacement_host`
+**or** `regex` + `replacement`, never both. Rules are applied in declaration
+order — later rules see the output of earlier ones, so you can chain them.
+
+`browser-proxy test <url>` prints the rewritten URL when it differs from the
+input, so you can debug rule chains without opening a browser.
+
+## Logging
+
+Off by default. Turn on with `log = true` in the config; every `open` call then
+appends one or more lines to a per-user log file:
+
+```
+2026-05-05 14:23:45  rewrite  http://github.com/foo?utm_source=x  →  https://github.com/foo
+2026-05-05 14:23:45  routed   https://github.com/foo  →  Firefox  (rule 0: prefix=https://github.com/)  source=Slack
+2026-05-05 14:23:46  routed   https://nitter.net/x  →  Google Chrome [profile=Personal]  (default)
+2026-05-05 14:23:47  error    open "Firefox": exit status 1
+```
+
+```toml
+log = true
+# log_file = "~/browser-proxy.log"   # optional override
+```
+
+Defaults if `log_file` is unset:
+
+- **macOS**: `~/Library/Logs/browser-proxy.log` (visible in Console.app)
+- **Linux**: `$XDG_STATE_HOME/browser-proxy/browser-proxy.log`
+  (typically `~/.local/state/browser-proxy/browser-proxy.log`)
+
+The file is created on demand with mode `0600` (URL history is sensitive) and
+appended to. The `test` dry-run command never touches the log file. If the
+file can't be opened, browser-proxy prints a one-line warning to stderr and
+keeps routing — logging is best-effort and never blocks the click.
 
 ## Commands
 

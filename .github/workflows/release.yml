@@ -1,0 +1,121 @@
+name: Release
+
+# Build & publish binaries whenever a v* tag is pushed.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  build-linux:
+    name: Build linux/${{ matrix.arch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        # Substitute every external value via env:, then quote in the script —
+        # never interpolate ${{ ... }} directly into the shell.
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${VERSION}" \
+            -o "browser-proxy-linux-${GOARCH}" \
+            ./cmd/browser-proxy
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-proxy-linux-${{ matrix.arch }}
+          path: browser-proxy-linux-${{ matrix.arch }}
+          retention-days: 1
+          if-no-files-found: error
+
+  build-darwin:
+    name: Build darwin/${{ matrix.arch }}
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: macos-13       # Intel runner — for darwin-amd64
+          - arch: arm64
+            runner: macos-latest   # Apple Silicon runner — for darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        env:
+          CGO_ENABLED: '1'   # required: handler_darwin.m / source_darwin.go use Cocoa
+          GOOS: darwin
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          go build \
+            -trimpath \
+            -ldflags="-s -w -X main.Version=${VERSION}" \
+            -o "browser-proxy-darwin-${GOARCH}" \
+            ./cmd/browser-proxy
+      - name: Ad-hoc codesign
+        # macOS executes ad-hoc-signed binaries; without any signature on
+        # Apple Silicon you'd hit "killed: 9" via the kernel's signing check.
+        env:
+          GOARCH: ${{ matrix.arch }}
+        run: codesign --sign - --force "browser-proxy-darwin-${GOARCH}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-proxy-darwin-${{ matrix.arch }}
+          path: browser-proxy-darwin-${{ matrix.arch }}
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [build-linux, build-darwin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Compute SHA-256 sums
+        working-directory: artifacts
+        run: |
+          sha256sum browser-proxy-* > SHA256SUMS
+          cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/browser-proxy-linux-amd64
+            artifacts/browser-proxy-linux-arm64
+            artifacts/browser-proxy-darwin-amd64
+            artifacts/browser-proxy-darwin-arm64
+            artifacts/SHA256SUMS

@@ -1,0 +1,15 @@
+# Local build outputs
+/browser-proxy
+/browser-proxy-*
+
+# CI download dir
+/artifacts/
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Stray log files
+*.log

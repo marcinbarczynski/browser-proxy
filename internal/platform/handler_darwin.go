@@ -4,28 +4,41 @@ package platform
 
 /*
 #cgo CFLAGS: -x objective-c -fobjc-arc
-#cgo LDFLAGS: -framework Cocoa -framework Foundation
+#cgo LDFLAGS: -framework Cocoa -framework Foundation -framework AppKit
 #include "handler_darwin.h"
 */
 import "C"
 
-var urlCh = make(chan string, 32)
+import "github.com/max/browser-proxy/internal/source"
+
+type incoming struct {
+	url string
+	src source.Info
+}
+
+var urlCh = make(chan incoming, 32)
 
 //export HandleURL
-func HandleURL(curl *C.char) {
-	s := C.GoString(curl)
+func HandleURL(curl, csrcID, csrcName *C.char) {
+	msg := incoming{
+		url: C.GoString(curl),
+		src: source.Info{
+			Name:     C.GoString(csrcName),
+			BundleID: C.GoString(csrcID),
+		},
+	}
 	select {
-	case urlCh <- s:
+	case urlCh <- msg:
 	default:
 	}
 }
 
-// RunDaemon starts the Cocoa event loop and forwards each received URL to handle.
-// It blocks until the application exits.
-func RunDaemon(handle func(string)) {
+// RunDaemon starts the Cocoa event loop and forwards each URL+source to handle.
+// Blocks until the application exits.
+func RunDaemon(handle func(url string, src source.Info)) {
 	go func() {
-		for u := range urlCh {
-			handle(u)
+		for m := range urlCh {
+			handle(m.url, m.src)
 		}
 	}()
 	C.RunMacApp()
