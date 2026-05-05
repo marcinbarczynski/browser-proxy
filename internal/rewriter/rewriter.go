@@ -158,8 +158,12 @@ func (r RegexRule) String() string {
 }
 
 // matchHost: copy of router's helper kept local so rewriter doesn't depend
-// on router. Same semantics: exact match, or "*.foo" matches "foo" and any
-// "*.foo" subdomain.
+// on router. Same semantics:
+//
+//   - exact match
+//   - "*.foo" matches the apex foo and any *.foo subdomain
+//   - a bare host pattern also matches its www. variant ("twitter.com" also
+//     matches "www.twitter.com")
 func matchHost(host, pattern string) bool {
 	if host == "" || pattern == "" {
 		return false
@@ -170,6 +174,9 @@ func matchHost(host, pattern string) bool {
 	if strings.HasPrefix(pattern, "*.") {
 		base := pattern[2:]
 		return host == base || strings.HasSuffix(host, "."+base)
+	}
+	if host == "www."+pattern {
+		return true
 	}
 	return false
 }

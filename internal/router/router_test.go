@@ -41,12 +41,27 @@ func TestHostMatch(t *testing.T) {
 		"https://atlassian.net/":           "Firefox",
 		"https://example.com/foo":          "Brave",
 		"https://EXAMPLE.com/foo":          "Brave",
+		"https://www.example.com/foo":      "Brave",   // bare host matches www. variant
 		"https://other.com/":               "Default",
+		"https://api.example.com/":         "Default", // www-fallback only, not all subdomains
 	}
 	for url, want := range cases {
 		if got := r.Resolve(url, noSrc); got.Browser != want {
 			t.Errorf("Resolve(%q) = %q, want %q", url, got.Browser, want)
 		}
+	}
+}
+
+func TestHostMatch_ExplicitWWWStaysSpecific(t *testing.T) {
+	// host = "www.example.com" must NOT also match the bare apex.
+	r := mustRouter(t, "Default",
+		Rule{URL: HostMatcher{Pattern: "www.example.com"}, Browser: "Specific"},
+	)
+	if got := r.Resolve("https://example.com/", noSrc); got.Browser != "Default" {
+		t.Errorf("explicit www. pattern must not match bare apex, got %s", got.Browser)
+	}
+	if got := r.Resolve("https://www.example.com/", noSrc); got.Browser != "Specific" {
+		t.Errorf("explicit www. pattern should match itself, got %s", got.Browser)
 	}
 }
 

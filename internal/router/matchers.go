@@ -44,6 +44,15 @@ func (m HostMatcher) Matches(u *url.URL, _ string) bool {
 }
 func (m HostMatcher) String() string { return "host=" + m.Pattern }
 
+// matchHost compares u.Hostname() against a user-supplied pattern.
+//
+// Match rules:
+//
+//   - exact:        host == pattern
+//   - "*." prefix:  pattern[2:] matches the apex AND any subdomain
+//   - bare host:    additionally matches www.<pattern> as a convenience —
+//     so a rule with `host = "example.com"` covers both example.com and
+//     www.example.com without having to spell out the wildcard.
 func matchHost(host, pattern string) bool {
 	if host == "" || pattern == "" {
 		return false
@@ -54,6 +63,9 @@ func matchHost(host, pattern string) bool {
 	if strings.HasPrefix(pattern, "*.") {
 		base := pattern[2:]
 		return host == base || strings.HasSuffix(host, "."+base)
+	}
+	if host == "www."+pattern {
+		return true
 	}
 	return false
 }

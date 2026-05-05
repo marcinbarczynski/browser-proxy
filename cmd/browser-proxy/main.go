@@ -16,7 +16,7 @@ import (
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
 // Local builds report this default; CI release builds report the git tag.
-var Version = "0.7.0"
+var Version = "0.8.0"
 
 const usage = `browser-proxy — route URLs to the right browser
 

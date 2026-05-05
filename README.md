@@ -98,6 +98,10 @@ host = "*.atlassian.net"          # "*." also matches the apex (atlassian.net)
 browser = "Firefox"
 
 [[rules]]
+host = "example.com"              # also auto-matches www.example.com
+browser = "Brave"
+
+[[rules]]
 regex = "^https://meet\\.google\\.com"
 browser = "Google Chrome"
 
@@ -116,6 +120,19 @@ prefix = "https://docs."
 source = "Mail"
 browser = "Safari"
 ```
+
+### `host` matching semantics
+
+| Pattern               | Matches                                                |
+| --------------------- | ------------------------------------------------------ |
+| `host = "example.com"`   | `example.com` **and** `www.example.com`             |
+| `host = "*.example.com"` | `example.com` (apex) **and** every `*.example.com` subdomain (`www.`, `api.`, …) |
+| `host = "www.example.com"` | only `www.example.com` — bare apex is **not** matched |
+
+The bare-host → `www.` fallback is for convenience: nearly every host you'd
+write a routing rule for has a `www.` variant, and it's surprising if a
+literal-looking pattern misses it. Use the explicit `www.` form (or a regex)
+if you really want apex/sub split.
 
 ### `browser` values
 

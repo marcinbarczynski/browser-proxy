@@ -89,12 +89,13 @@ func TestHostReplaceRule(t *testing.T) {
 		in, want string
 	}{
 		{"https://twitter.com/user", "https://nitter.net/user"},
-		{"https://twitter.com:8080/user", "https://nitter.net:8080/user"},     // port preserved
-		{"https://TWITTER.COM/user", "https://nitter.net/user"},               // case-insensitive
+		{"https://twitter.com:8080/user", "https://nitter.net:8080/user"},      // port preserved
+		{"https://TWITTER.COM/user", "https://nitter.net/user"},                // case-insensitive
+		{"https://www.twitter.com/x", "https://nitter.net/x"},                  // bare host matches www.
 		{"https://www.youtube.com/watch?v=x", "https://invidious.example/watch?v=x"},
-		{"https://youtube.com/x", "https://invidious.example/x"},              // wildcard apex
+		{"https://youtube.com/x", "https://invidious.example/x"},               // wildcard apex
 		{"https://example.com/twitter.com", "https://example.com/twitter.com"}, // not the host
-		{"https://other.example/", "https://other.example/"},                  // no match
+		{"https://other.example/", "https://other.example/"},                   // no match
 	}
 	for _, c := range cases {
 		if got := r.Apply(c.in); got != c.want {
