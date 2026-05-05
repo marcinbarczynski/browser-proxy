@@ -61,10 +61,13 @@ jobs:
     strategy:
       matrix:
         include:
+          # macos-13 was retired 2025-12-08. macos-15-intel is GitHub's last
+          # Intel-CPU runner and will go away in August 2027 — switch to a
+          # cross-compile setup before then.
           - arch: amd64
-            runner: macos-13       # Intel runner — for darwin-amd64
+            runner: macos-15-intel
           - arch: arm64
-            runner: macos-latest   # Apple Silicon runner — for darwin-arm64
+            runner: macos-latest   # Apple Silicon
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
