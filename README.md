@@ -176,8 +176,36 @@ name (`firefox`, `google-chrome`) if you need profile targeting.
 ## URL rewrites
 
 Rewrites are applied to the incoming URL **before** routing — so rules can
-match the rewritten form. Three layers are run in order: `force_https` →
-`strip_params` → `[[rewrites]]`.
+match the rewritten form. Four layers run in order:
+`force_https` → `unwrap_redirects` → `strip_params` → `[[rewrites]]`.
+
+### Built-in unwrappers
+
+Many apps don't hand you the link you actually clicked — they wrap it in their
+own redirect (for SSO, scanning, tracking, …). With `unwrap_redirects = true`
+(default) browser-proxy peels these layers off so your routing rules can match
+on the real destination. Recognised wrappers:
+
+| Source                   | Pattern                                              | Where it lives           |
+| ------------------------ | ---------------------------------------------------- | ------------------------ |
+| **Slack** "Sign in with Slack" | `slack.com/openid/connect/login_initiate_redirect?login_hint=<JWT>` | JWT payload `target_uri` claim |
+| **Microsoft Safe Links** (Outlook + Teams) | `*.safelinks.protection.outlook.com/?url=…` | `url` query param        |
+| **Google**               | `www.google.com/url?q=…` (Gmail, Calendar, Search)   | `q` (or `url`) param     |
+| **LinkedIn**             | `www.linkedin.com/redir/redirect?url=…`              | `url` param              |
+| **Facebook**             | `l.facebook.com/l.php?u=…` (and `lm.facebook.com`)   | `u` param                |
+| **YouTube**              | `www.youtube.com/redirect?q=…`                       | `q` param                |
+
+Wrappers can be nested (e.g. an Outlook email containing a Slack OIDC link →
+Microsoft wraps Slack wraps Atlassian); unwrapping recurses up to 5 layers.
+
+For Slack OIDC the JWT signature is **not** verified — that's the next hop's
+job. We only extract the `target_uri` claim. URL targets are scheme-checked
+to be `http`/`https` so a malicious wrapper can't smuggle a `javascript:`
+redirect through.
+
+Disable with `unwrap_redirects = false`.
+
+### Other layers
 
 ```toml
 # Upgrade every http:// to https:// before matching the rules.

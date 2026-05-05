@@ -1,9 +1,12 @@
 // Package rewriter applies URL transformations before routing.
 //
-// Three layers, applied in this order to every URL:
-//  1. ForceHTTPS  — flips "http://" to "https://".
-//  2. StripParams — drops named (or *-prefixed) query parameters.
-//  3. Rules       — ordered list of host-replacements / regex-replacements.
+// Four layers, applied in this order to every URL:
+//  1. ForceHTTPS      — flips "http://" to "https://".
+//  2. UnwrapRedirects — peels off known wrapper URLs (Slack OIDC, Microsoft
+//                       Safe Links, Google /url, LinkedIn, Facebook, YouTube)
+//                       so the rule engine sees the actual destination.
+//  3. StripParams     — drops named (or *-prefixed) query parameters.
+//  4. Rules           — ordered list of host-replacements / regex-replacements.
 //
 // All layers are best-effort: if a URL fails to parse or no rule matches,
 // the original URL is returned unchanged.
@@ -16,9 +19,10 @@ import (
 )
 
 type Rewriter struct {
-	ForceHTTPS  bool
-	StripParams []ParamMatcher
-	Rules       []Rule
+	ForceHTTPS      bool
+	UnwrapRedirects bool
+	StripParams     []ParamMatcher
+	Rules           []Rule
 }
 
 // Apply runs all configured transformations and returns the final URL.
@@ -31,6 +35,12 @@ func (r *Rewriter) Apply(rawURL string) string {
 
 	if r.ForceHTTPS && strings.HasPrefix(s, "http://") {
 		s = "https://" + strings.TrimPrefix(s, "http://")
+	}
+
+	if r.UnwrapRedirects {
+		if newS, ok := unwrapAll(s); ok {
+			s = newS
+		}
 	}
 
 	if len(r.StripParams) > 0 {

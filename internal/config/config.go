@@ -30,13 +30,14 @@ func (c *Config) Close() error {
 }
 
 type rawConfig struct {
-	Default     string       `toml:"default"`
-	ForceHTTPS  bool         `toml:"force_https"`
-	StripParams []string     `toml:"strip_params"`
-	Rewrites    []rawRewrite `toml:"rewrites"`
-	Rules       []rawRule    `toml:"rules"`
-	Log         bool         `toml:"log"`
-	LogFile     string       `toml:"log_file"`
+	Default         string       `toml:"default"`
+	ForceHTTPS      bool         `toml:"force_https"`
+	UnwrapRedirects *bool        `toml:"unwrap_redirects"` // *bool so unset defaults to true
+	StripParams     []string     `toml:"strip_params"`
+	Rewrites        []rawRewrite `toml:"rewrites"`
+	Rules           []rawRule    `toml:"rules"`
+	Log             bool         `toml:"log"`
+	LogFile         string       `toml:"log_file"`
 }
 
 type rawRule struct {
@@ -144,6 +145,11 @@ func buildRule(i int, rr rawRule) (router.Rule, error) {
 
 func buildRewriter(raw rawConfig) (*rewriter.Rewriter, error) {
 	rw := &rewriter.Rewriter{ForceHTTPS: raw.ForceHTTPS}
+	// unwrap_redirects defaults to true — only off if user explicitly disables.
+	rw.UnwrapRedirects = true
+	if raw.UnwrapRedirects != nil {
+		rw.UnwrapRedirects = *raw.UnwrapRedirects
+	}
 	for i, p := range raw.StripParams {
 		if p == "" {
 			return nil, fmt.Errorf("strip_params[%d]: empty pattern", i)
@@ -201,6 +207,13 @@ log = false
 
 # Upgrade every http:// to https:// before matching.
 force_https = true
+
+# Built-in: peel off known wrapper URLs so routing rules see the actual target.
+# Recognized wrappers: Slack OIDC (login_initiate_redirect), Microsoft Safe
+# Links (Outlook/Teams *.safelinks.protection.outlook.com), Google /url
+# (Gmail), LinkedIn /redir, Facebook l.php, YouTube /redirect.
+# Set to false to disable.
+unwrap_redirects = true
 
 # Drop these query parameters from every URL. "*" suffix = prefix wildcard.
 strip_params = [
