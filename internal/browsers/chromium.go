@@ -46,7 +46,7 @@ func lookupChromiumProfile(localStatePath, spec string) string {
 	if _, ok := ls.Profile.InfoCache[spec]; ok {
 		return spec
 	}
-	// 2. Display-name match (user wrote "Work")
+	// 2. Display-name match (case-insensitive)
 	for dir, info := range ls.Profile.InfoCache {
 		if strings.EqualFold(info.Name, spec) {
 			return dir
@@ -55,29 +55,50 @@ func lookupChromiumProfile(localStatePath, spec string) string {
 	return ""
 }
 
-// chromiumLocalStatePaths returns the candidate Local State paths for the
-// given browser name on the current OS. Order doesn't matter because the
-// patterns are mutually exclusive.
+// chromiumLocalStatePaths returns Local State path candidates for a given
+// browser name on the current OS. Thin wrapper around the pure version
+// (testable without depending on os.UserHomeDir / runtime.GOOS).
 func chromiumLocalStatePaths(browser string) []string {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return nil
 	}
-	n := strings.ToLower(browser)
+	return chromiumLocalStatePathsImpl(browser, home, runtime.GOOS)
+}
 
-	switch runtime.GOOS {
+// chromiumLocalStatePathsImpl is the pure mapping from browser name + home +
+// goos to a Local State path. Inputs are normalised so that dash/dot/space/
+// underscore separators all match the same channel — i.e. "google-chrome-beta",
+// "Google Chrome Beta" and the macOS bundle ID "com.google.Chrome.beta" all
+// resolve to the same channel.
+//
+// Channels recognised (Chrome family): stable, beta, dev (also called
+// "unstable" on Linux), canary. Plus a handful of related Chromium-based
+// browsers (Chromium itself, Brave, Edge, Vivaldi, Opera, Arc, Thorium).
+func chromiumLocalStatePathsImpl(browser, home, goos string) []string {
+	if home == "" {
+		return nil
+	}
+	// Normalise: lowercase + collapse dot/dash/underscore/slash to space.
+	// Lets a single keyword like "chrome beta" match every spelling.
+	n := strings.NewReplacer(".", " ", "-", " ", "_", " ", "/", " ").
+		Replace(strings.ToLower(browser))
+
+	switch goos {
 	case "darwin":
 		base := filepath.Join(home, "Library", "Application Support")
 		switch {
 		case strings.Contains(n, "chrome canary"):
 			return []string{filepath.Join(base, "Google", "Chrome Canary", "Local State")}
+		case strings.Contains(n, "chrome beta"):
+			return []string{filepath.Join(base, "Google", "Chrome Beta", "Local State")}
+		case strings.Contains(n, "chrome dev"), strings.Contains(n, "chrome unstable"):
+			return []string{filepath.Join(base, "Google", "Chrome Dev", "Local State")}
 		case strings.Contains(n, "chromium"):
 			return []string{filepath.Join(base, "Chromium", "Local State")}
-		case strings.Contains(n, "chrome"):
-			return []string{filepath.Join(base, "Google", "Chrome", "Local State")}
 		case strings.Contains(n, "brave"):
 			return []string{filepath.Join(base, "BraveSoftware", "Brave-Browser", "Local State")}
-		case strings.Contains(n, "edge"):
+		case strings.Contains(n, "edge"), strings.Contains(n, "msedge"):
 			return []string{filepath.Join(base, "Microsoft Edge", "Local State")}
 		case strings.Contains(n, "vivaldi"):
 			return []string{filepath.Join(base, "Vivaldi", "Local State")}
@@ -85,17 +106,23 @@ func chromiumLocalStatePaths(browser string) []string {
 			return []string{filepath.Join(base, "com.operasoftware.Opera", "Local State")}
 		case strings.Contains(n, "arc"):
 			return []string{filepath.Join(base, "Arc", "User Data", "Local State")}
+		case strings.Contains(n, "chrome"):
+			return []string{filepath.Join(base, "Google", "Chrome", "Local State")}
 		}
 	case "linux":
 		base := filepath.Join(home, ".config")
 		switch {
+		case strings.Contains(n, "chrome canary"):
+			return []string{filepath.Join(base, "google-chrome-canary", "Local State")}
+		case strings.Contains(n, "chrome beta"):
+			return []string{filepath.Join(base, "google-chrome-beta", "Local State")}
+		case strings.Contains(n, "chrome dev"), strings.Contains(n, "chrome unstable"):
+			return []string{filepath.Join(base, "google-chrome-unstable", "Local State")}
 		case strings.Contains(n, "chromium"):
 			return []string{filepath.Join(base, "chromium", "Local State")}
-		case strings.Contains(n, "google-chrome"), strings.Contains(n, "chrome"):
-			return []string{filepath.Join(base, "google-chrome", "Local State")}
 		case strings.Contains(n, "brave"):
 			return []string{filepath.Join(base, "BraveSoftware", "Brave-Browser", "Local State")}
-		case strings.Contains(n, "edge"):
+		case strings.Contains(n, "edge"), strings.Contains(n, "msedge"):
 			return []string{filepath.Join(base, "microsoft-edge", "Local State")}
 		case strings.Contains(n, "vivaldi"):
 			return []string{filepath.Join(base, "vivaldi", "Local State")}
@@ -103,6 +130,8 @@ func chromiumLocalStatePaths(browser string) []string {
 			return []string{filepath.Join(base, "opera", "Local State")}
 		case strings.Contains(n, "thorium"):
 			return []string{filepath.Join(base, "thorium", "Local State")}
+		case strings.Contains(n, "chrome"):
+			return []string{filepath.Join(base, "google-chrome", "Local State")}
 		}
 	}
 	return nil

@@ -3,6 +3,8 @@ package browsers
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +80,116 @@ func TestResolveChromiumProfile_PassthroughOnNoMatch(t *testing.T) {
 	// Unknown browser → no Local State path → passthrough.
 	if got := ResolveChromiumProfile("UnknownBrowser", "Profile 1"); got != "Profile 1" {
 		t.Errorf("expected passthrough %q, got %q", "Profile 1", got)
+	}
+}
+
+// ── chromiumLocalStatePathsImpl: per-channel path resolution ──────────────
+
+func TestChromiumLocalStatePaths_Linux(t *testing.T) {
+	cases := []struct {
+		name, browser, wantSuffix string
+	}{
+		{"stable binary", "google-chrome", ".config/google-chrome/Local State"},
+		{"stable alias", "google-chrome-stable", ".config/google-chrome/Local State"},
+		{"beta binary", "google-chrome-beta", ".config/google-chrome-beta/Local State"},
+		{"beta absolute path", "/opt/google/chrome-beta/google-chrome-beta", ".config/google-chrome-beta/Local State"},
+		{"unstable", "google-chrome-unstable", ".config/google-chrome-unstable/Local State"},
+		{"chromium", "chromium", ".config/chromium/Local State"},
+		{"chromium-browser", "chromium-browser", ".config/chromium/Local State"},
+		{"brave", "brave-browser", ".config/BraveSoftware/Brave-Browser/Local State"},
+		{"edge", "microsoft-edge", ".config/microsoft-edge/Local State"},
+		{"vivaldi", "vivaldi", ".config/vivaldi/Local State"},
+		{"thorium", "thorium-browser", ".config/thorium/Local State"},
+		{"unknown returns nil", "lynx", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := chromiumLocalStatePathsImpl(c.browser, "/home/u", "linux")
+			if c.wantSuffix == "" {
+				if len(got) != 0 {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.HasSuffix(got[0], c.wantSuffix) {
+				t.Errorf("got %v, want suffix %q", got, c.wantSuffix)
+			}
+		})
+	}
+}
+
+func TestChromiumLocalStatePaths_Darwin(t *testing.T) {
+	cases := []struct {
+		name, browser, wantSuffix string
+	}{
+		{"chrome stable", "Google Chrome", "Library/Application Support/Google/Chrome/Local State"},
+		{"chrome beta name", "Google Chrome Beta", "Library/Application Support/Google/Chrome Beta/Local State"},
+		{"chrome beta bundle id", "com.google.Chrome.beta", "Library/Application Support/Google/Chrome Beta/Local State"},
+		{"chrome dev name", "Google Chrome Dev", "Library/Application Support/Google/Chrome Dev/Local State"},
+		{"chrome canary", "Google Chrome Canary", "Library/Application Support/Google/Chrome Canary/Local State"},
+		{"chromium", "Chromium", "Library/Application Support/Chromium/Local State"},
+		{"brave", "Brave Browser", "Library/Application Support/BraveSoftware/Brave-Browser/Local State"},
+		{"edge", "Microsoft Edge", "Library/Application Support/Microsoft Edge/Local State"},
+		{"opera", "Opera", "Library/Application Support/com.operasoftware.Opera/Local State"},
+		{"arc", "Arc", "Library/Application Support/Arc/User Data/Local State"},
+		{"unknown returns nil", "Safari", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := chromiumLocalStatePathsImpl(c.browser, "/Users/u", "darwin")
+			if c.wantSuffix == "" {
+				if len(got) != 0 {
+					t.Errorf("expected nil, got %v", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.HasSuffix(got[0], c.wantSuffix) {
+				t.Errorf("got %v, want suffix %q", got, c.wantSuffix)
+			}
+		})
+	}
+}
+
+// Critical regression: ensure beta isn't accidentally matched as stable
+// (the bug that hid logicjoe profiles in google-chrome instead of -beta).
+func TestChromiumPaths_BetaDoesNotFallToStable(t *testing.T) {
+	got := chromiumLocalStatePathsImpl("google-chrome-beta", "/home/u", "linux")
+	if len(got) != 1 || strings.Contains(got[0], "google-chrome/Local State") {
+		t.Errorf("beta must not resolve to stable path, got %v", got)
+	}
+	if !strings.HasSuffix(got[0], "google-chrome-beta/Local State") {
+		t.Errorf("expected google-chrome-beta path, got %v", got)
+	}
+}
+
+// End-to-end: integration test for the user's actual case — display-name
+// "logic-joe.com" in google-chrome-beta should resolve to "Profile 1".
+func TestResolveChromiumProfile_BetaChannelDisplayNameLookup(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific path layout")
+	}
+
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	betaDir := filepath.Join(tmpHome, ".config", "google-chrome-beta")
+	if err := os.MkdirAll(betaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	js := `{"profile":{"info_cache":{
+		"Default":   {"name":"jeschek.dev"},
+		"Profile 1": {"name":"logic-joe.com"}
+	}}}`
+	if err := os.WriteFile(filepath.Join(betaDir, "Local State"), []byte(js), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ResolveChromiumProfile("google-chrome-beta", "logic-joe.com")
+	if got != "Profile 1" {
+		t.Errorf("expected Profile 1 (display-name lookup), got %q", got)
+	}
+	got = ResolveChromiumProfile("google-chrome-beta", "Default")
+	if got != "Default" {
+		t.Errorf("expected Default (direct match), got %q", got)
 	}
 }
