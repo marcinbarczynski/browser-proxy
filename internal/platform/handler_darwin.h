@@ -1,0 +1,6 @@
+#ifndef BROWSER_PROXY_HANDLER_DARWIN_H
+#define BROWSER_PROXY_HANDLER_DARWIN_H
+
+void RunMacApp(void);
+
+#endif
