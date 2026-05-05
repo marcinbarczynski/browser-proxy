@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/max/browser-proxy/internal/config"
-	"github.com/max/browser-proxy/internal/opener"
-	"github.com/max/browser-proxy/internal/platform"
-	"github.com/max/browser-proxy/internal/source"
+	"github.com/maxischmaxi/browser-proxy/internal/config"
+	"github.com/maxischmaxi/browser-proxy/internal/opener"
+	"github.com/maxischmaxi/browser-proxy/internal/platform"
+	"github.com/maxischmaxi/browser-proxy/internal/source"
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".

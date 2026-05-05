@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/max/browser-proxy/internal/source"
+	"github.com/maxischmaxi/browser-proxy/internal/source"
 )
 
 // Rule combines optional URL- and Source-constraints with a target browser

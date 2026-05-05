@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/max/browser-proxy/internal/browsers"
+	"github.com/maxischmaxi/browser-proxy/internal/browsers"
 )
 
 // Open launches the given browser with the URL via macOS' open(1).

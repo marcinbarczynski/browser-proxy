@@ -9,7 +9,7 @@ package platform
 */
 import "C"
 
-import "github.com/max/browser-proxy/internal/source"
+import "github.com/maxischmaxi/browser-proxy/internal/source"
 
 type incoming struct {
 	url string

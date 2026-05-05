@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/max/browser-proxy/internal/source"
+	"github.com/maxischmaxi/browser-proxy/internal/source"
 )
 
 func mustRouter(t *testing.T, def string, rules ...Rule) *Router {

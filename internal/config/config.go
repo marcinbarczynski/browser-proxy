@@ -8,9 +8,9 @@ import (
 	"regexp"
 
 	"github.com/BurntSushi/toml"
-	"github.com/max/browser-proxy/internal/logging"
-	"github.com/max/browser-proxy/internal/rewriter"
-	"github.com/max/browser-proxy/internal/router"
+	"github.com/maxischmaxi/browser-proxy/internal/logging"
+	"github.com/maxischmaxi/browser-proxy/internal/rewriter"
+	"github.com/maxischmaxi/browser-proxy/internal/router"
 )
 
 // Config bundles everything Load returns: routing table, URL rewriter, and

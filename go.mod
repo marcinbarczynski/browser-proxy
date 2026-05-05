@@ -1,4 +1,4 @@
-module github.com/max/browser-proxy
+module github.com/maxischmaxi/browser-proxy
 
 go 1.22
 

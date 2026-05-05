@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/max/browser-proxy/internal/browsers"
+	"github.com/maxischmaxi/browser-proxy/internal/browsers"
 )
 
 // Open launches the given browser with the URL, optionally targeting a profile.
