@@ -266,16 +266,40 @@ keeps routing — logging is best-effort and never blocks the click.
 
 ## Commands
 
-| Command          | What it does                                                |
-| ---------------- | ----------------------------------------------------------- |
-| `init`           | Write the example config                                    |
-| `install`        | Register as system default browser                          |
-| `uninstall`      | Remove the bundle / desktop file                            |
-| `open <url>`     | Route the URL (called by the OS, also useful for testing)   |
-| `test <url>`     | Print the chosen browser without opening anything           |
-| `daemon`         | macOS-internal: Apple-Event listener invoked from the bundle |
-| `config`         | Show the active config path and contents                    |
-| `version`        | Print version                                               |
+| Command              | What it does                                                |
+| -------------------- | ----------------------------------------------------------- |
+| `init`               | Write the example config                                    |
+| `install`            | Register as system default browser                          |
+| `uninstall`          | Remove the bundle / desktop file                            |
+| `open <url>`         | Route the URL (called by the OS, also useful for testing)   |
+| `test <url>`         | Print the chosen browser without opening anything           |
+| `profiles <browser>` | List a Chromium- or Firefox-family browser's profile names  |
+| `daemon`             | macOS-internal: Apple-Event listener invoked from the bundle |
+| `config`             | Show the active config path and contents                    |
+| `version`            | Print version                                               |
+
+### Discovering profile names
+
+Run `browser-proxy profiles <browser>` to see what to put into a rule's
+`profile` field. Works with both the binary name and the macOS app/bundle ID:
+
+```
+$ browser-proxy profiles google-chrome-beta
+Browser: google-chrome-beta (Chromium family)
+Source:  /home/max/.config/google-chrome-beta/Local State
+
+DIRECTORY  DISPLAY NAME   EMAIL
+Default    Personal       me@personal.com
+Profile 1  Work           me@work.com
+
+In a rule's 'profile' field you may use either form:
+  profile = "Work"        # display-name lookup
+  profile = "Profile 1"   # direct directory match
+```
+
+Firefox shows the names you'd pass to `firefox -P`, plus which one starts by
+default (marked `*`). LibreWolf and Waterfox use their own profile dirs and
+work the same.
 
 ## How it works
 

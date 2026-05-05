@@ -2,11 +2,71 @@ package browsers
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
+
+// ChromiumProfile describes one entry from a Chromium-family Local State.
+type ChromiumProfile struct {
+	Directory string // "Default" or "Profile N"
+	Name      string // user-visible display name from chrome://settings
+	Email     string // signed-in account email (Local State user_name); may be empty
+}
+
+// ListChromiumProfiles enumerates the profiles stored by a Chromium-family
+// browser. Returns the source path actually read so callers can show users
+// where the data came from.
+func ListChromiumProfiles(browser string) (sourcePath string, profiles []ChromiumProfile, err error) {
+	paths := chromiumLocalStatePaths(browser)
+	if len(paths) == 0 {
+		return "", nil, fmt.Errorf("%q is not a recognised Chromium-family browser", browser)
+	}
+	for _, p := range paths {
+		data, readErr := os.ReadFile(p)
+		if readErr != nil {
+			continue
+		}
+		profiles, err := parseChromiumLocalState(data)
+		if err != nil {
+			return p, nil, fmt.Errorf("parse %s: %w", p, err)
+		}
+		if len(profiles) == 0 {
+			return p, nil, fmt.Errorf("Local State %s has no profiles (start the browser once to create one)", p)
+		}
+		return p, profiles, nil
+	}
+	return "", nil, fmt.Errorf("no Local State found for %q (looked at %v)", browser, paths)
+}
+
+// parseChromiumLocalState extracts profile entries, sorted by Directory for
+// stable output.
+func parseChromiumLocalState(data []byte) ([]ChromiumProfile, error) {
+	var ls struct {
+		Profile struct {
+			InfoCache map[string]struct {
+				Name     string `json:"name"`
+				UserName string `json:"user_name"`
+			} `json:"info_cache"`
+		} `json:"profile"`
+	}
+	if err := json.Unmarshal(data, &ls); err != nil {
+		return nil, err
+	}
+	out := make([]ChromiumProfile, 0, len(ls.Profile.InfoCache))
+	for dir, info := range ls.Profile.InfoCache {
+		out = append(out, ChromiumProfile{
+			Directory: dir,
+			Name:      info.Name,
+			Email:     info.UserName,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Directory < out[j].Directory })
+	return out, nil
+}
 
 // ResolveChromiumProfile maps a profile spec to a value suitable for
 // --profile-directory=. The spec can be either:

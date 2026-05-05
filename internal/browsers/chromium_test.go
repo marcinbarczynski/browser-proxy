@@ -83,6 +83,91 @@ func TestResolveChromiumProfile_PassthroughOnNoMatch(t *testing.T) {
 	}
 }
 
+// ── ListChromiumProfiles ─────────────────────────────────────────────────
+
+func TestParseChromiumLocalState(t *testing.T) {
+	js := `{
+		"profile": {
+			"info_cache": {
+				"Default":   {"name": "Personal", "user_name": "me@personal.com"},
+				"Profile 1": {"name": "Work",     "user_name": "me@work.com"},
+				"Profile 2": {"name": "No Email"}
+			}
+		}
+	}`
+	profs, err := parseChromiumLocalState([]byte(js))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profs) != 3 {
+		t.Fatalf("got %d, want 3", len(profs))
+	}
+	// Sorted by Directory: Default, Profile 1, Profile 2
+	if profs[0].Directory != "Default" || profs[0].Name != "Personal" || profs[0].Email != "me@personal.com" {
+		t.Errorf("[0]: %+v", profs[0])
+	}
+	if profs[1].Directory != "Profile 1" || profs[1].Email != "me@work.com" {
+		t.Errorf("[1]: %+v", profs[1])
+	}
+	if profs[2].Directory != "Profile 2" || profs[2].Email != "" {
+		t.Errorf("[2]: %+v", profs[2])
+	}
+}
+
+func TestParseChromiumLocalState_InvalidJSON(t *testing.T) {
+	if _, err := parseChromiumLocalState([]byte("{not json")); err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestParseChromiumLocalState_MissingInfoCache(t *testing.T) {
+	profs, err := parseChromiumLocalState([]byte(`{"profile": {}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profs) != 0 {
+		t.Errorf("expected 0 profiles, got %d", len(profs))
+	}
+}
+
+func TestListChromiumProfiles_UnknownBrowser(t *testing.T) {
+	_, _, err := ListChromiumProfiles("safari")
+	if err == nil {
+		t.Error("expected error for non-chromium browser")
+	}
+}
+
+func TestListChromiumProfiles_Linux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific path layout")
+	}
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	dir := filepath.Join(tmpHome, ".config", "google-chrome-beta")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	js := `{"profile":{"info_cache":{
+		"Default":   {"name":"jeschek.dev",   "user_name":"max@jeschek.dev"},
+		"Profile 1": {"name":"logic-joe.com", "user_name":"m.jeschek@logic-joe.com"}
+	}}}`
+	if err := os.WriteFile(filepath.Join(dir, "Local State"), []byte(js), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	source, profs, err := ListChromiumProfiles("google-chrome-beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(source, "google-chrome-beta") {
+		t.Errorf("source path missing channel: %q", source)
+	}
+	if len(profs) != 2 || profs[0].Email != "max@jeschek.dev" {
+		t.Errorf("profiles: %+v", profs)
+	}
+}
+
 // ── chromiumLocalStatePathsImpl: per-channel path resolution ──────────────
 
 func TestChromiumLocalStatePaths_Linux(t *testing.T) {

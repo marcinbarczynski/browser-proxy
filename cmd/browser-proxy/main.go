@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"text/tabwriter"
 
+	"github.com/maxischmaxi/browser-proxy/internal/browsers"
 	"github.com/maxischmaxi/browser-proxy/internal/config"
 	"github.com/maxischmaxi/browser-proxy/internal/opener"
 	"github.com/maxischmaxi/browser-proxy/internal/platform"
@@ -13,8 +15,8 @@ import (
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
-// Local builds report "dev"; CI release builds report the git tag (e.g. "v0.5.0").
-var Version = "0.6.0"
+// Local builds report this default; CI release builds report the git tag.
+var Version = "0.7.0"
 
 const usage = `browser-proxy — route URLs to the right browser
 
@@ -29,6 +31,8 @@ Commands:
   test [-source NAME] <url>
                        Print which browser/profile would be used (does not open anything)
                        -source overrides the auto-detected source app
+  profiles <browser>   List the profile names known by a Chromium- or
+                       Firefox-family browser (use these as 'profile' in rules)
   daemon               Run the URL-event listener (macOS-internal; called from .app)
   config               Show the active config path and contents
   version              Print version
@@ -57,6 +61,8 @@ func main() {
 		must(cmdOpen(args))
 	case "test":
 		must(cmdTest(args))
+	case "profiles":
+		must(cmdProfiles(args))
 	case "daemon":
 		runDaemon()
 	case "config":
@@ -174,6 +180,80 @@ func dotNoSpace(s string) bool {
 		}
 	}
 	return hasDot
+}
+
+func cmdProfiles(args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: browser-proxy profiles <browser>")
+	}
+	browser := args[0]
+	switch browsers.DetectFamily(browser) {
+	case browsers.Chromium:
+		return printChromiumProfiles(browser)
+	case browsers.Firefox:
+		return printFirefoxProfiles(browser)
+	default:
+		return fmt.Errorf("%q is not a Chromium- or Firefox-family browser; profile listing is only supported for those", browser)
+	}
+}
+
+func printChromiumProfiles(browser string) error {
+	source, profiles, err := browsers.ListChromiumProfiles(browser)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Browser: %s (Chromium family)\nSource:  %s\n\n", browser, source)
+
+	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "DIRECTORY\tDISPLAY NAME\tEMAIL")
+	for _, p := range profiles {
+		email := p.Email
+		if email == "" {
+			email = "—"
+		}
+		name := p.Name
+		if name == "" {
+			name = "—"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", p.Directory, name, email)
+	}
+	w.Flush()
+
+	fmt.Println()
+	fmt.Println("In a rule's 'profile' field you may use either form:")
+	if len(profiles) > 0 && profiles[0].Name != "" {
+		fmt.Printf("  profile = \"%s\"   # display-name lookup\n", profiles[0].Name)
+	}
+	if len(profiles) > 0 {
+		fmt.Printf("  profile = \"%s\"   # direct directory match\n", profiles[0].Directory)
+	}
+	return nil
+}
+
+func printFirefoxProfiles(browser string) error {
+	source, profiles, err := browsers.ListFirefoxProfiles(browser)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Browser: %s (Firefox family)\nSource:  %s\n\n", browser, source)
+
+	w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "NAME\tPATH\tDEFAULT")
+	for _, p := range profiles {
+		def := ""
+		if p.IsDefault {
+			def = "*"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", p.Name, p.Path, def)
+	}
+	w.Flush()
+
+	fmt.Println()
+	fmt.Println("In a rule's 'profile' field, use the NAME column:")
+	if len(profiles) > 0 {
+		fmt.Printf("  profile = \"%s\"\n", profiles[0].Name)
+	}
+	return nil
 }
 
 func cmdOpen(args []string) error {
