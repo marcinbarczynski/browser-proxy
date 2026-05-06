@@ -5,6 +5,63 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-05-06
+
+Architecture rewrite of the Chrome extension. The webNavigation-based
+intercept used by v1.0.0–v1.0.2 was unfixably racy: by the time
+`onCommitted` fires (the only event that exposes `transitionType`),
+Chrome has already allocated a renderer for the destination URL, the
+DOM may have started constructing, and page JS may already have fired
+a follow-up navigation that we never get to intercept — leaking tabs
+into Chrome that the user wanted in another browser.
+
+v1.0.3 moves interception to the `<a>` click event itself via a content
+script. `preventDefault()` runs synchronously in the capture phase,
+stopping Chrome from doing *anything* with the link before the host has
+weighed in. There is no destination tab to flicker, no goBack to
+race, no leakage.
+
+### Changed
+
+- **Interception moved from `webNavigation` to a content script.**
+  Listens on `click` + `auxclick` in the capture phase, filters to
+  `<a href>` with an http(s) destination, calls `preventDefault()`
+  synchronously, then asks the background SW to make the routing call.
+- **Modifier keys preserved on passthrough.** When the host says the
+  URL stays in this browser, the background SW re-performs the
+  navigation matching the original click's intent: `shift` → new
+  window, `ctrl`/`cmd`/middle-click/`target=_blank` → new tab,
+  otherwise same tab.
+- **Address-bar input, bookmarks, reloads, form submits, history
+  navigation, and JS-driven navigation pass through automatically**
+  because they don't go through `<a>` click events. The v1.0.2
+  `transitionType === "link"` filter is no longer needed and was
+  removed along with its `webNavigation` listeners.
+
+### Fixed
+
+- Tab cascade when clicking a link routed to another browser. v1.0.2
+  could leak two or three Chrome tabs per click when page JS fired a
+  secondary navigation during the host-roundtrip window between
+  `onCommitted` and `tabs.remove`.
+- Same-document anchor jumps (`<a href="#section">`) are no longer
+  routed.
+- `alt`-click is no longer intercepted (it's the OS-level "save link"
+  modifier on most platforms).
+
+### Notes
+
+- New manifest permission profile: `webNavigation` and `storage` are no
+  longer requested. `nativeMessaging`, `tabs`, and `host_permissions`
+  for http(s) remain (the latter is what allows the content script to
+  inject everywhere).
+- Slightly higher per-click latency: ~50–100 ms while we wait for the
+  native host roundtrip. The host is one-shot per call; a future
+  release may switch to `connectNative` to keep it warm.
+- Reload the extension in `chrome://extensions` after upgrading
+  (`browser-proxy install` extracts the new files but Chrome doesn't
+  auto-reload unpacked extensions).
+
 ## [1.0.2] - 2026-05-06
 
 ### Changed
@@ -195,6 +252,7 @@ based on a TOML config.
 - GitHub Actions release pipeline (Linux amd64/arm64,
   macOS amd64/arm64).
 
+[1.0.3]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/maxischmaxi/browser-proxy/compare/v0.9.0...v1.0.0

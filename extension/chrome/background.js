@@ -1,41 +1,25 @@
 // Browser Proxy — Chrome MV3 service worker.
 //
-// Hooks top-level link-click navigations, asks the native-messaging host
-// whether the URL should be routed to a different browser, and — if yes
-// — undoes the in-Chrome side. The native host is the same `browser-proxy`
-// binary that handles default-browser clicks; it has already opened the
-// URL elsewhere by the time it answers.
+// In v1.0.3 the SW no longer listens to webNavigation. Click interception
+// happens in content_script.js, which preventDefault's the click and
+// forwards us a {type:"route", url, newTab, newWindow, background} message.
+// Our job here:
 //
-// Routing decisions are deliberately limited to actual link clicks
-// (transitionType === "link"). Address-bar input, bookmarks, reloads,
-// form submits, and history navigation all stay in the originating
-// browser — the user is explicitly driving that browser, hijacking
-// would be hostile.
-//
-// Loop protection (lessons from v1.0.0):
-//
-// The v1.0.0 cascade happened when the host's routing decision named a
-// browser whose alias wasn't in CURRENT_BROWSERS — the host would
-// "redirect" to that same browser the click came from, spawning a fresh
-// tab, firing onBeforeNavigate again, and repeating exponentially. We
-// now have THREE independent defenses, any one of which is enough to
-// stop the cascade:
-//
-//   1. URL-keyed dedupe: if a URL was just redirected, ignore subsequent
-//      events for the same URL for RECENTLY_REDIRECTED_TTL_MS — regardless
-//      of which tab they fire in. The v1.0.0 cache was tabId-keyed and
-//      never matched cascade tabs (each new tab has a new id).
-//   2. Global rate limit: at most MAX_CALLS_PER_WINDOW host calls per
-//      RATE_WINDOW_MS. Once the limit is exceeded we fail open for
-//      RATE_COOLDOWN_MS so even a pathological loop terminates within ~1s.
-//   3. Ping handshake on first request: the host MUST acknowledge a {ping}
-//      message before we send routable URLs. If a v1.0.0 host is somehow
-//      still installed and ignores ping, we never call it.
+//   1. Confirm the native host speaks our protocol (ping handshake).
+//   2. Apply a global rate limit so a buggy site spamming clicks can't
+//      DoS the host.
+//   3. Forward the URL to the host. If the host says redirect=true it has
+//      already opened the URL in the target browser — we do nothing more
+//      and the in-Chrome side is naturally absent (the click was prevented).
+//   4. If the host says redirect=false (or is unreachable), re-perform the
+//      navigation in Chrome ourselves: tabs.update for same-tab,
+//      tabs.create for new-tab, windows.create for new-window. The user
+//      still gets where they wanted to go.
 
 const NATIVE_HOST = "com.maxischmaxi.browser_proxy";
 
-// What the native host should compare its routing decision against to know
-// "the click came from me, don't bounce it back".
+// What the host should compare its routing decision against to recognise
+// "this click came from me, don't bounce it back here".
 const CURRENT_BROWSERS = [
   "Google Chrome",
   "Chrome",
@@ -43,27 +27,11 @@ const CURRENT_BROWSERS = [
   "google-chrome-stable",
 ];
 
-// Defense 1: URL-keyed dedupe (cross-tab, with TTL).
-const recentlyRedirected = new Map(); // url -> timestamp
-const RECENTLY_REDIRECTED_TTL_MS = 10_000;
-
-function wasRecentlyRedirected(url) {
-  const ts = recentlyRedirected.get(url);
-  if (ts === undefined) return false;
-  if (Date.now() - ts > RECENTLY_REDIRECTED_TTL_MS) {
-    recentlyRedirected.delete(url);
-    return false;
-  }
-  return true;
-}
-
-function rememberRedirected(url) {
-  recentlyRedirected.set(url, Date.now());
-}
-
-// Defense 2: global call-rate limiter.
+// Global rate limit. Click interception is one click → one host call,
+// so legitimate use is bounded by user typing speed. This guards against
+// a misbehaving page firing synthetic clicks.
 const callTimestamps = [];
-const MAX_CALLS_PER_WINDOW = 10;
+const MAX_CALLS_PER_WINDOW = 20;
 const RATE_WINDOW_MS = 3_000;
 const RATE_COOLDOWN_MS = 10_000;
 let cooldownUntil = 0;
@@ -77,11 +45,8 @@ function rateLimitOK() {
   if (callTimestamps.length >= MAX_CALLS_PER_WINDOW) {
     cooldownUntil = now + RATE_COOLDOWN_MS;
     console.warn(
-      `[Browser Proxy] rate limit hit (${MAX_CALLS_PER_WINDOW} calls in ` +
-        `${RATE_WINDOW_MS}ms) — failing open for ${RATE_COOLDOWN_MS}ms. ` +
-        "This usually means the native host is mis-routing; check your " +
-        "config.toml's `default` and rule browser names against the " +
-        "actual binary names on this OS."
+      `[Browser Proxy] rate limit hit (${MAX_CALLS_PER_WINDOW} clicks in ` +
+        `${RATE_WINDOW_MS}ms) — failing open for ${RATE_COOLDOWN_MS}ms.`
     );
     return false;
   }
@@ -89,8 +54,9 @@ function rateLimitOK() {
   return true;
 }
 
-// Defense 3: confirm with the host that it speaks the v1.0.1+ protocol
-// before we ever ship it a real URL. Cached in chrome.storage.session.
+// Confirm the host responds to {ping:true} with {ok:true} before we ever
+// send it a real URL. Cached for 60s; a freshly-installed v1.0.1+ host
+// is picked up without requiring a Chrome restart.
 let pingPromise = null;
 
 async function confirmHostHandshake() {
@@ -105,138 +71,62 @@ async function confirmHostHandshake() {
       return false;
     }
   })();
-  // Re-probe periodically so a freshly-installed host is picked up without
-  // requiring a Chrome restart.
   setTimeout(() => {
     pingPromise = null;
   }, 60_000);
   return pingPromise;
 }
 
-// Tab IDs we're currently tearing down — guards against the close/goBack
-// itself triggering another onBeforeNavigate event we'd react to.
-const tearingDown = new Set();
-
-// We listen on onCommitted, not onBeforeNavigate, because transitionType
-// (the field that tells us "link click" vs "address bar typed" vs
-// "bookmark" vs "reload" vs "form submit" vs "back/forward") is only
-// populated on onCommitted. onBeforeNavigate doesn't expose it.
-//
-// The cost: by the time onCommitted fires the tab has started loading
-// the destination URL — we may flicker briefly before tearing it down.
-// The benefit: we can correctly leave address-bar typing, bookmarks,
-// reloads, and history navigation alone. Those represent the user
-// explicitly driving the current browser; routing them elsewhere is
-// hostile.
-//
-// Only "link" transitions are intercepted. Everything else passes
-// through to the originating browser unchanged.
-const ROUTABLE_TRANSITIONS = new Set(["link"]);
-
-// Tabs that were created by a link click (target=_blank, cmd-click,
-// window.open, etc). Tracked via onCreatedNavigationTarget so the
-// tear-down code knows to close the new tab rather than navigate it
-// back. Entries auto-expire after 30s in case onCommitted never fires.
-const freshFromLink = new Map();
-
-chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
-  freshFromLink.set(details.tabId, Date.now());
-  setTimeout(() => freshFromLink.delete(details.tabId), 30_000);
+chrome.runtime.onMessage.addListener((msg, sender, _sendResponse) => {
+  if (msg && msg.type === "route") {
+    handleRoute(msg, sender);
+  }
+  return false; // we don't send a response back; content script is fire-and-forget
 });
 
-chrome.webNavigation.onCommitted.addListener(async (details) => {
-  if (details.frameId !== 0) return;
-  if (!/^https?:\/\//i.test(details.url)) return;
-  if (tearingDown.has(details.tabId)) return;
-  if (!ROUTABLE_TRANSITIONS.has(details.transitionType)) return;
+async function handleRoute(msg, sender) {
+  let routedExternally = false;
 
-  // Defense 1
-  if (wasRecentlyRedirected(details.url)) {
-    return;
-  }
-  // Defense 2
-  if (!rateLimitOK()) {
-    return;
-  }
-  // Defense 3
-  if (!(await confirmHostHandshake())) {
-    return;
-  }
-
-  let resp;
-  try {
-    resp = await chrome.runtime.sendNativeMessage(NATIVE_HOST, {
-      url: details.url,
-      current_browsers: CURRENT_BROWSERS,
-    });
-  } catch (err) {
-    console.warn("[Browser Proxy] native host error:", err?.message ?? err);
-    return;
-  }
-
-  if (!resp || !resp.redirect) return;
-
-  rememberRedirected(details.url);
-  tearingDown.add(details.tabId);
-  // Consume the freshness flag now so a follow-up onCommitted on the same
-  // tab id (after we tabs.update it back) doesn't see it.
-  const wasFresh = freshFromLink.has(details.tabId);
-  freshFromLink.delete(details.tabId);
-  try {
-    await tearDownNavigation(details.tabId, wasFresh);
-  } catch (err) {
-    console.warn("[Browser Proxy] tear-down failed:", err?.message ?? err);
-  } finally {
-    tearingDown.delete(details.tabId);
-  }
-});
-
-// tearDownNavigation cancels the in-browser side of a navigation we just
-// redirected. Two cases:
-//
-//   1. Fresh tab — Chrome created a new tab for this navigation
-//      (target=_blank, cmd-click, window.open). Close it. Special case:
-//      if it's the only tab in the window, navigate to newtab so closing
-//      doesn't quit the browser.
-//   2. Existing tab — the user clicked a link on a page they were already
-//      on. Keep them on the prior page; goBack() does that, with
-//      about:blank as a fallback when there's nothing to go back to.
-//
-// We trust the wasFresh flag from onCreatedNavigationTarget — checking
-// tab.url no longer works here because by onCommitted tab.url is already
-// the destination URL, so the v1.0.1 "is it about:blank?" heuristic
-// always reported false.
-async function tearDownNavigation(tabId, wasFresh) {
-  let tab;
-  try {
-    tab = await chrome.tabs.get(tabId);
-  } catch {
-    return;
-  }
-
-  if (wasFresh) {
-    const tabs = await chrome.tabs.query({ windowId: tab.windowId });
-    if (tabs.length <= 1) {
-      await chrome.tabs.update(tabId, { url: "chrome://newtab/" });
-      return;
+  if (rateLimitOK() && (await confirmHostHandshake())) {
+    try {
+      const resp = await chrome.runtime.sendNativeMessage(NATIVE_HOST, {
+        url: msg.url,
+        current_browsers: CURRENT_BROWSERS,
+      });
+      routedExternally = !!(resp && resp.redirect);
+    } catch (err) {
+      console.warn(
+        "[Browser Proxy] native host error:",
+        err?.message ?? err
+      );
     }
-    await chrome.tabs.remove(tabId);
+  }
+
+  if (routedExternally) {
+    // Host already opened in the target browser. Do nothing in Chrome.
     return;
   }
 
+  // Passthrough: re-perform the navigation as Chrome would have done it
+  // before our content script preventDefault'd. Match the click's intent:
+  // shift = new window, ctrl/cmd/middle/_blank = new tab, otherwise same
+  // tab.
   try {
-    await chrome.tabs.goBack(tabId);
-  } catch {
-    await chrome.tabs.update(tabId, { url: "about:blank" });
+    if (msg.newWindow) {
+      await chrome.windows.create({ url: msg.url });
+    } else if (msg.newTab) {
+      await chrome.tabs.create({ url: msg.url, active: !msg.background });
+    } else if (sender?.tab?.id !== undefined) {
+      await chrome.tabs.update(sender.tab.id, { url: msg.url });
+    } else {
+      // Sender tab info missing — fall back to a new tab so the click isn't
+      // silently lost.
+      await chrome.tabs.create({ url: msg.url });
+    }
+  } catch (err) {
+    console.warn(
+      "[Browser Proxy] passthrough nav failed:",
+      err?.message ?? err
+    );
   }
 }
-
-// Periodic prune so the dedupe map can't grow unbounded if the SW stays
-// warm for a long session. The TTL check on read already keeps things
-// correct; this just bounds memory.
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, ts] of recentlyRedirected) {
-    if (now - ts > RECENTLY_REDIRECTED_TTL_MS) recentlyRedirected.delete(k);
-  }
-}, 60_000);
