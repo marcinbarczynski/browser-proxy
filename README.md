@@ -283,20 +283,17 @@ keeps routing — logging is best-effort and never blocks the click.
 
 ## Commands
 
-| Command                                  | What it does                                                |
-| ---------------------------------------- | ----------------------------------------------------------- |
-| `init`                                   | Write the example config                                    |
-| `install`                                | Register as system default browser                          |
-| `uninstall`                              | Remove the bundle / desktop file                            |
-| `open <url>`                             | Route the URL (called by the OS, also useful for testing)   |
-| `test <url>`                             | Print the chosen browser without opening anything           |
-| `profiles <browser>`                     | List a Chromium- or Firefox-family browser's profile names  |
-| `install-extension <browser> <ext-id>`   | Wire up the in-browser extension (see below)                |
-| `uninstall-extension <browser>`          | Remove the native-messaging registration                    |
-| `native-host`                            | stdio loop the browser extension talks to (auto-invoked)    |
-| `daemon`                                 | macOS-internal: Apple-Event listener invoked from the bundle |
-| `config`                                 | Show the active config path and contents                    |
-| `version`                                | Print version                                               |
+| Command              | What it does                                                 |
+| -------------------- | ------------------------------------------------------------ |
+| `init`               | Write the example config                                     |
+| `install`            | Register as system default browser                           |
+| `uninstall`          | Remove the bundle / desktop file                             |
+| `open <url>`         | Route the URL (called by the OS, also useful for testing)    |
+| `test <url>`         | Print the chosen browser without opening anything            |
+| `profiles <browser>` | List a Chromium- or Firefox-family browser's profile names   |
+| `daemon`             | macOS-internal: Apple-Event listener invoked from the bundle |
+| `config`             | Show the active config path and contents                     |
+| `version`            | Print version                                                |
 
 ### Discovering profile names
 
@@ -321,70 +318,21 @@ Firefox shows the names you'd pass to `firefox -P`, plus which one starts by
 default (marked `*`). LibreWolf and Waterfox use their own profile dirs and
 work the same.
 
-## In-browser routing (Chrome extension)
+## Scope: OS-level routing only
 
-The OS-level handler only sees URLs that come **from other apps** (Slack,
-Mail, Terminal). When you click a link **inside Chrome**, Chromium handles
-it internally — `browser-proxy` never gets a chance to intercept. To route
-those clicks too, activate the companion extension. It hooks
-`webNavigation.onBeforeNavigate`, asks the daemon over Native Messaging
-whether the URL belongs in another browser, and — if yes — closes the new
-tab while the daemon opens the URL in the right browser.
+`browser-proxy` only sees URLs that come **from other apps** (Slack, Mail,
+Terminal, system notifications, …) — i.e. anything the OS dispatches via
+its default-browser machinery (`xdg-open` / Apple Events). Clicks **inside**
+a browser are handled internally by that browser and never reach us. An
+in-browser companion-extension shipped briefly in v1.0.x and was rolled
+back in v1.1.0 because the click-intercept flow turned out unreliable.
 
-`browser-proxy install` already places the extension files on disk and
-registers the native-messaging host for every Chromium-family browser it
-finds on the machine (Chrome, Brave, Edge, Vivaldi, Chromium, Chrome
-Beta/Canary, Arc, Opera). All that's left is to load it inside the
-browser.
-
-### Activating the extension
-
-After running `browser-proxy install`:
-
-1. Open `chrome://extensions` (or `brave://extensions`,
-   `edge://extensions`, etc.).
-2. Enable **Developer mode** (top-right toggle).
-3. Click **Load unpacked** and pick the directory `install` printed:
-   - macOS: `~/Library/Application Support/browser-proxy/extension/chrome`
-   - Linux: `~/.local/share/browser-proxy/extension/chrome` (or
-     `$XDG_DATA_HOME/browser-proxy/extension/chrome`)
-4. Click the extension's toolbar icon → **Test connection**. It should turn
-   green ("Native host reachable. Routing is active.").
-
-The extension has a stable ID (`lapppffemojdmedcoanjllncgiejbjjo`) baked
-into its manifest, so you don't need to copy any IDs by hand.
-
-### Adding a browser later
-
-If you install a new Chromium-family browser after running
-`browser-proxy install`, register it with:
-
-```
-browser-proxy install-extension <browser>
-```
-
-Where `<browser>` is one of: `chrome`, `chrome-beta`, `chrome-canary`,
-`chromium`, `brave`, `edge`, `vivaldi`, `arc`, `opera`. To undo:
-`browser-proxy uninstall-extension <browser>`.
-
-### What it does (and doesn't)
-
-- Top-level `http(s)` navigations only — iframes and non-web schemes are
-  ignored.
-- If the routing decision picks the same browser the click came from, the
-  navigation is allowed to proceed in-place — no round trip to another
-  window.
-- If the daemon is unreachable (binary moved, config invalid) the extension
-  fails open: the click goes through in the original browser as usual.
-- `browser-proxy install` never touches `config.toml` — your routing rules
-  are safe across reinstalls. (Initial config is created by
-  `browser-proxy init`, which refuses to clobber an existing file.)
-
-### Firefox
-
-A Firefox build of the extension is not in the box yet. Same architecture
-(`browser.runtime.connectNative`), different manifest dialect, separate
-NativeMessagingHosts directory. File an issue if you need it.
+If you need cross-profile / cross-browser routing for clicks that already
+happen inside a browser, the practical options today are:
+- a per-browser extension you install yourself (e.g. *Open in Browser*-style)
+- a profile-switching keystroke (Chrome's "switch profile" / "guest"); or
+- moving the link source out of the browser (e.g. configure your work apps
+  to deep-link via `xdg-open`, which goes through us).
 
 ## How it works
 

@@ -5,6 +5,50 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-05-06
+
+Removes the in-browser routing feature entirely. The Chrome companion
+extension shipped in v1.0.0–v1.0.4 went through three different
+intercept architectures (webNavigation.onBeforeNavigate,
+.onCommitted, content-script click capture) and none of them produced
+reliable cross-browser routing in practice. This release rolls the
+feature back; `browser-proxy` is now back to scope-of-v0.9.0:
+OS-level default-browser routing for clicks that come from other apps.
+
+### Removed
+
+- The Chrome MV3 companion extension (`extension/chrome/*`,
+  `extension/embed.go`).
+- `internal/nativehost/` — the Chrome Native-Messaging stdio
+  implementation.
+- `internal/platform/native_messaging.go`,
+  `internal/platform/extension_install.go` — the manifest writer and
+  asset extractor.
+- Subcommands `install-extension`, `uninstall-extension`,
+  `native-host`.
+- `chrome-extension://` argv auto-detect in `main`.
+- Manifest `key`, `scripting`, `webNavigation` permissions, content
+  scripts, programmatic injection, ping handshake, rate limiter,
+  URL-keyed dedupe — all gone with the extension.
+
+### Added
+
+- `installCleanupLegacyExtension`: every `install` and `uninstall`
+  best-effort-removes the unpacked extension directory and any
+  `com.maxischmaxi.browser_proxy.json` native-messaging manifests
+  written by v1.0.0–v1.0.4. Upgrades from a v1.0.x install leave
+  no orphans on disk.
+
+### Notes
+
+- Existing v1.0.x users: run `browser-proxy install` once after
+  upgrading. It writes the new bundle/desktop file and sweeps up the
+  prior extension's leftovers automatically. If you also added the
+  unpacked extension to Chrome by hand, remove it from
+  `chrome://extensions` — the daemon will no longer respond to it.
+- `config.toml` is still untouched by `install`/`uninstall`, same as
+  in 1.0.x.
+
 ## [1.0.4] - 2026-05-06
 
 v1.0.3 introduced a regression: content scripts declared in the
@@ -289,6 +333,7 @@ based on a TOML config.
 - GitHub Actions release pipeline (Linux amd64/arm64,
   macOS amd64/arm64).
 
+[1.1.0]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.1...v1.0.2

@@ -17,7 +17,7 @@ const (
 	bundleName     = "Browser Proxy"
 	bundleID       = "com.maxischmaxi.browser-proxy"
 	bundleExec     = "browser-proxy"
-	bundleVersion  = "1.0.4"
+	bundleVersion  = "1.1.0"
 	lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 )
 
@@ -165,21 +165,22 @@ func Install() error {
 	fmt.Println("Now set Browser Proxy as your default browser:")
 	fmt.Println("  System Settings → Desktop & Dock → Default web browser → Browser Proxy")
 
-	// Install never touches ~/.config/browser-proxy/config.toml — that's
-	// `init`'s job. We only place the in-browser extension assets and wire
-	// up native messaging for browsers that already exist on this machine.
-	chromeDir, registered, err := InstallExtensionAssetsAndRegister()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: extension setup failed: %v\n", err)
-		return nil
+	// v1.0.0 – v1.0.4 also installed a Chrome companion extension and
+	// wrote native-messaging manifests into every Chromium browser's
+	// config dir. The feature was dropped in v1.1.0 — sweep up any
+	// leftovers from those versions on every install.
+	for _, p := range cleanupLegacyExtension() {
+		fmt.Printf("Removed leftover: %s\n", p)
 	}
-	PrintExtensionSetup(chromeDir, registered)
+
+	// Install never touches ~/.config/browser-proxy/config.toml — that's
+	// `init`'s job.
 	return nil
 }
 
-// Uninstall deletes the bundle from ~/Applications and removes any
-// in-browser-extension assets and native-messaging registrations that
-// `install` set up. Leaves config.toml alone.
+// Uninstall deletes the bundle from ~/Applications and any leftover
+// in-browser-extension artifacts from v1.0.0–v1.0.4 if they exist.
+// Leaves config.toml alone.
 func Uninstall() error {
 	bundle := bundlePath()
 	if err := os.RemoveAll(bundle); err != nil {
@@ -187,7 +188,7 @@ func Uninstall() error {
 	}
 	fmt.Printf("Removed: %s\n", bundle)
 
-	for _, p := range UninstallExtensionAssetsAndUnregister() {
+	for _, p := range cleanupLegacyExtension() {
 		fmt.Printf("Removed: %s\n", p)
 	}
 

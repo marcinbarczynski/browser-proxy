@@ -75,21 +75,22 @@ func Install() error {
 	fmt.Printf("Installed: %s\n", target)
 	fmt.Println("Some apps cache the default browser — log out/in if a click still goes to the previous one.")
 
-	// Install never touches ~/.config/browser-proxy/config.toml — that's
-	// `init`'s job. We only place the in-browser extension assets and wire
-	// up native messaging for browsers that already exist on this machine.
-	chromeDir, registered, err := InstallExtensionAssetsAndRegister()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: extension setup failed: %v\n", err)
-		return nil
+	// v1.0.0 – v1.0.4 also installed a Chrome companion extension and
+	// wrote native-messaging manifests into every Chromium browser's
+	// config dir. The feature was dropped in v1.1.0 — sweep up any
+	// leftovers from those versions on every install.
+	for _, p := range cleanupLegacyExtension() {
+		fmt.Printf("Removed leftover: %s\n", p)
 	}
-	PrintExtensionSetup(chromeDir, registered)
+
+	// Install never touches ~/.config/browser-proxy/config.toml — that's
+	// `init`'s job.
 	return nil
 }
 
-// Uninstall removes the .desktop file plus any in-browser-extension assets
-// and native-messaging registrations `install` set up. Leaves config.toml
-// alone. The user has to set a new default browser.
+// Uninstall removes the .desktop file and any leftover in-browser-
+// extension artifacts from v1.0.0–v1.0.4 if they exist. Leaves
+// config.toml alone. The user has to set a new default browser.
 func Uninstall() error {
 	target := filepath.Join(appsDir(), desktopFile)
 	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
@@ -98,7 +99,7 @@ func Uninstall() error {
 	_ = exec.Command("update-desktop-database", appsDir()).Run()
 	fmt.Printf("Removed: %s\n", target)
 
-	for _, p := range UninstallExtensionAssetsAndUnregister() {
+	for _, p := range cleanupLegacyExtension() {
 		fmt.Printf("Removed: %s\n", p)
 	}
 
