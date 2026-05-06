@@ -1,45 +1,51 @@
 // Content script — runs in every http(s) page at document_start.
 //
-// Intercepts <a href> clicks BEFORE Chrome processes them, so we can stop
-// the navigation completely instead of fighting Chrome's webNavigation
-// pipeline after the fact. This was the architecture switch in v1.0.3
-// after v1.0.2's onCommitted-based approach turned out to be unfixably
-// racy (page JS could fire window.open or window.location.href = ...
-// during the host-roundtrip window, leaking navigations into Chrome that
-// we never got to intercept).
-//
-// We listen in the capture phase so page-level handlers don't beat us
-// to it. If the page already preventDefault'd the click (e.g. the page
-// runs its own client-side router), we leave it alone.
+// Intercepts <a href> clicks BEFORE Chrome processes them, so we can
+// stop the navigation completely instead of fighting Chrome's
+// webNavigation pipeline after the fact (the unfixably racy approach
+// in v1.0.0–v1.0.2). preventDefault() in the click handler runs
+// synchronously; Chrome doesn't allocate a renderer for the
+// destination URL, no flicker, no race.
 //
 // Why both 'click' and 'auxclick': Chrome dispatches 'click' for the
-// primary button (button 0) and 'auxclick' for non-primary (button 1
-// = middle, button 2 = right). Right-click is filtered out below.
+// primary mouse button (button 0) and 'auxclick' for non-primary
+// (1 = middle, 2 = right). Right-click is filtered out below.
 //
-// preventDefault() in the click handler stops:
-//   - same-tab navigation
-//   - new-tab opening from middle-click / cmd-click / target=_blank
-//
-// After preventDefault we hand off to the background script via
-// chrome.runtime.sendMessage. The background does the host roundtrip,
-// then either:
-//   - leaves Chrome unchanged (host already opened in the target browser)
-//   - re-performs the navigation in Chrome (passthrough): tabs.update for
-//     same-tab, tabs.create for new-tab, windows.create for new-window.
+// Idempotency guard: chrome.scripting.executeScript can re-inject
+// this file into a tab where the manifest content_scripts already
+// loaded it. Without the guard we'd register click listeners twice
+// → two host calls per click → two firefox windows or rate-limit
+// hits.
 
 (() => {
+  if (window.__browserProxyContentScriptLoaded) {
+    return;
+  }
+  window.__browserProxyContentScriptLoaded = true;
+
+  const LOG_PREFIX = "[Browser Proxy CS]";
+  console.log(LOG_PREFIX, "loaded on", window.location.href);
+
   function shouldIntercept(e, a) {
-    if (e.defaultPrevented) return false;
-    // Right-click (button 2) → never intercept; that's the context menu.
-    if (e.button !== 0 && e.button !== 1) return false;
-    // alt-click is a download intent on most platforms — leave it alone.
-    if (e.altKey) return false;
-    // Need an http(s) destination. <a href="#section">, mailto:, javascript:,
-    // tel:, etc. all skip.
-    if (!a || !a.href) return false;
-    if (!/^https?:\/\//i.test(a.href)) return false;
-    // Same-document anchor jumps (#fragment within current page) shouldn't
-    // route — they're not real navigations.
+    if (e.defaultPrevented) {
+      console.log(LOG_PREFIX, "skip: defaultPrevented");
+      return false;
+    }
+    if (e.button !== 0 && e.button !== 1) {
+      return false;
+    }
+    if (e.altKey) {
+      console.log(LOG_PREFIX, "skip: alt-click (download intent)");
+      return false;
+    }
+    if (!a || !a.href) {
+      return false;
+    }
+    if (!/^https?:\/\//i.test(a.href)) {
+      console.log(LOG_PREFIX, "skip: non-http(s) href", a.href);
+      return false;
+    }
+    // Same-document anchor jumps (#fragment within current page).
     try {
       const here = new URL(window.location.href);
       const there = new URL(a.href);
@@ -49,6 +55,7 @@
         here.search === there.search &&
         there.hash !== ""
       ) {
+        console.log(LOG_PREFIX, "skip: same-document anchor");
         return false;
       }
     } catch {
@@ -59,15 +66,25 @@
 
   function handleClick(e) {
     const a = e.target?.closest?.("a[href]");
-    if (!a) return;
-    if (!shouldIntercept(e, a)) return;
+    if (!a) {
+      return;
+    }
+    if (!shouldIntercept(e, a)) {
+      return;
+    }
 
     const url = a.href;
     const newTab =
       a.target === "_blank" || e.metaKey || e.ctrlKey || e.button === 1;
     const newWindow = e.shiftKey;
-    // Middle-click is conventionally a background tab on Chrome/Firefox.
     const background = e.button === 1;
+
+    console.log(LOG_PREFIX, "intercept click", {
+      url,
+      newTab,
+      newWindow,
+      background,
+    });
 
     e.preventDefault();
     e.stopPropagation();
@@ -81,10 +98,15 @@
         background,
         sourceUrl: window.location.href,
       })
+      .then((resp) => {
+        console.log(LOG_PREFIX, "background ack", resp);
+      })
       .catch((err) => {
-        // Background SW might be cold; surface in console. The user's click
-        // will be lost in this case — rare, only if the SW is broken.
-        console.warn("[Browser Proxy] sendMessage failed:", err?.message ?? err);
+        console.warn(
+          LOG_PREFIX,
+          "sendMessage failed — click was preventDefault'd, navigation lost",
+          err?.message ?? err
+        );
       });
   }
 

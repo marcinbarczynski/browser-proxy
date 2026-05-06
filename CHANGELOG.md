@@ -5,6 +5,43 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-05-06
+
+v1.0.3 introduced a regression: content scripts declared in the
+manifest are only auto-injected on FUTURE navigations, not into pages
+that were already open at the time of extension load/reload. Result:
+after upgrading from v1.0.2, link clicks on any tab the user already
+had open passed through to Chrome unchanged. Looked like the
+extension wasn't intercepting at all.
+
+### Fixed
+
+- **Programmatic injection on install/update/startup.** The SW now
+  uses `chrome.scripting.executeScript` to inject `content_script.js`
+  into every existing http(s) tab immediately after the extension
+  loads. Previously-open pages now intercept clicks without needing
+  a manual reload.
+- **Idempotency guard** in `content_script.js`: a window-level flag
+  prevents the click listeners from being registered twice when both
+  the manifest auto-injection and the programmatic injection target
+  the same tab.
+
+### Added
+
+- **Verbose console logging** with `[Browser Proxy CS]` (content
+  script, in the page's DevTools) and `[Browser Proxy SW]` (service
+  worker, in chrome://extensions → service worker → inspect). Logs
+  cover: content script load, click intercepts, skipped clicks and
+  why, handshake result, host response, passthrough vs redirect
+  decision and the reason. Open both consoles when debugging.
+- New `scripting` permission required for `chrome.scripting.executeScript`.
+
+### Notes
+
+- After upgrading: `chrome://extensions` → reload Browser Proxy. The
+  SW will inject the content script into all your already-open
+  http(s) tabs automatically. No need to manually F5 each one.
+
 ## [1.0.3] - 2026-05-06
 
 Architecture rewrite of the Chrome extension. The webNavigation-based
@@ -252,6 +289,7 @@ based on a TOML config.
 - GitHub Actions release pipeline (Linux amd64/arm64,
   macOS amd64/arm64).
 
+[1.0.4]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.0...v1.0.1

@@ -17,7 +17,7 @@ const (
 	bundleName     = "Browser Proxy"
 	bundleID       = "com.maxischmaxi.browser-proxy"
 	bundleExec     = "browser-proxy"
-	bundleVersion  = "1.0.3"
+	bundleVersion  = "1.0.4"
 	lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 )
 
