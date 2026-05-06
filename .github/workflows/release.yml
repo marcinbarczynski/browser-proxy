@@ -113,8 +113,43 @@ jobs:
         run: |
           sha256sum browser-proxy-* > SHA256SUMS
           cat SHA256SUMS
+      - name: Extract release notes from CHANGELOG.md
+        # Pulls the section for the current tag's version out of CHANGELOG.md
+        # and writes it to release-notes.md. action-gh-release later reads
+        # that via body_path. Fails the job if the section is missing —
+        # that's a forcing function: every tag must be documented before
+        # it can be released.
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v ver="$version" '
+            BEGIN { found = 0; printed = 0 }
+            $0 ~ ("^## \\[" ver "\\]") {
+              if (found) exit
+              found = 1
+              next
+            }
+            found && /^## \[/ { exit }
+            found {
+              print
+              printed++
+            }
+            END {
+              if (!printed) {
+                printf("ERROR: no CHANGELOG section for %s\n", ver) > "/dev/stderr"
+                exit 1
+              }
+            }
+          ' CHANGELOG.md > release-notes.md
+          echo "----- release-notes.md -----"
+          cat release-notes.md
       - uses: softprops/action-gh-release@v2
         with:
+          # body_path provides the curated highlights from CHANGELOG.md;
+          # generate_release_notes appends GitHub's auto-generated
+          # commit/PR list below — best of both worlds.
+          body_path: release-notes.md
           generate_release_notes: true
           files: |
             artifacts/browser-proxy-linux-amd64

@@ -5,10 +5,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
+	"github.com/maxischmaxi/browser-proxy/extension"
 	"github.com/maxischmaxi/browser-proxy/internal/browsers"
 	"github.com/maxischmaxi/browser-proxy/internal/config"
+	"github.com/maxischmaxi/browser-proxy/internal/nativehost"
 	"github.com/maxischmaxi/browser-proxy/internal/opener"
 	"github.com/maxischmaxi/browser-proxy/internal/platform"
 	"github.com/maxischmaxi/browser-proxy/internal/source"
@@ -16,7 +19,7 @@ import (
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
 // Local builds report this default; CI release builds report the git tag.
-var Version = "0.9.0"
+var Version = "1.0.0"
 
 const usage = `browser-proxy — route URLs to the right browser
 
@@ -33,6 +36,16 @@ Commands:
                        -source overrides the auto-detected source app
   profiles <browser>   List the profile names known by a Chromium- or
                        Firefox-family browser (use these as 'profile' in rules)
+  install-extension <browser>
+                       Register the native-messaging host for one extra
+                       browser (install already auto-registers any browser
+                       that exists on this machine). <browser> is one of
+                       chrome | chrome-beta | chrome-canary | chromium |
+                       brave | edge | vivaldi | arc | opera.
+  uninstall-extension <browser>
+                       Remove the native-messaging host registration.
+  native-host          Run the native-messaging stdio loop (called by the
+                       browser; not for manual use).
   daemon               Run the URL-event listener (macOS-internal; called from .app)
   config               Show the active config path and contents
   version              Print version
@@ -41,6 +54,15 @@ Commands:
 func main() {
 	if platform.IsBundleStart() && (len(os.Args) < 2 || os.Args[1] == "") {
 		runDaemon()
+		return
+	}
+
+	// Chrome native-messaging hosts are launched with the calling extension's
+	// origin as argv[1] (chrome-extension://<id>/). Auto-route to the host
+	// loop so the manifest's `path` can point straight at the binary without
+	// a wrapper script.
+	if len(os.Args) >= 2 && strings.HasPrefix(os.Args[1], "chrome-extension://") {
+		must(cmdNativeHost())
 		return
 	}
 
@@ -63,6 +85,12 @@ func main() {
 		must(cmdTest(args))
 	case "profiles":
 		must(cmdProfiles(args))
+	case "install-extension":
+		must(cmdInstallExtension(args))
+	case "uninstall-extension":
+		must(cmdUninstallExtension(args))
+	case "native-host":
+		must(cmdNativeHost())
 	case "daemon":
 		runDaemon()
 	case "config":
@@ -300,4 +328,85 @@ func runDaemon() {
 			fmt.Fprintf(os.Stderr, "route %q: %v\n", rawURL, err)
 		}
 	})
+}
+
+// cmdNativeHost runs the Chrome Native Messaging stdio loop. The browser
+// extension forwards every top-level navigation here. We answer with
+// {redirect:true} (and have already opened the URL externally) when the
+// routing decision points at a different browser than the caller, otherwise
+// {redirect:false} — the in-browser navigation is then allowed to proceed.
+func cmdNativeHost() error {
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return err
+	}
+	defer cfg.Close()
+
+	return nativehost.Run(func(req nativehost.Request) nativehost.Response {
+		if req.URL == "" {
+			return nativehost.Response{Error: "empty url"}
+		}
+
+		finalURL := cfg.Rewriter.Apply(req.URL)
+		if finalURL != req.URL {
+			cfg.Log.Rewritten(req.URL, finalURL)
+		}
+
+		// Native-messaging requests carry no source-app info — the source
+		// IS the calling browser, which we don't expose to rules.
+		d := cfg.Router.Resolve(finalURL, source.Info{})
+
+		// Don't redirect if the routing decision lands on the caller itself,
+		// otherwise we'd loop or pointlessly re-open in the same browser.
+		ruleDesc := ""
+		if d.MatchedRule() {
+			ruleDesc = cfg.Router.Rules[d.RuleIndex].Describe()
+		}
+
+		if req.IsCurrentBrowser(d.Browser) {
+			cfg.Log.Routed(finalURL, d.Browser, d.Profile, ruleDesc, "extension/passthrough", d.RuleIndex)
+			return nativehost.Response{Redirect: false, Browser: d.Browser, Profile: d.Profile}
+		}
+
+		if err := opener.Open(d.Browser, d.Profile, finalURL); err != nil {
+			cfg.Log.Error("native-host open %q: %v", d.Browser, err)
+			return nativehost.Response{Redirect: false, Error: err.Error()}
+		}
+		cfg.Log.Routed(finalURL, d.Browser, d.Profile, ruleDesc, "extension/redirect", d.RuleIndex)
+		return nativehost.Response{Redirect: true, Browser: d.Browser, Profile: d.Profile}
+	})
+}
+
+// cmdInstallExtension writes the native-messaging manifest for one browser
+// using the deterministic extension ID baked into the binary. Useful for
+// browsers that weren't yet installed when the user ran `install` (or that
+// got installed afterwards).
+func cmdInstallExtension(args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: browser-proxy install-extension <browser>")
+	}
+	path, err := platform.InstallNativeMessagingHost(args[0], extension.ExtensionID)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Wrote native-messaging manifest: %s\n", path)
+	fmt.Printf("Extension files live at: %s\n", platform.ExtensionAssetsDir())
+	fmt.Println("Reload the extension (or restart the browser) for the new registration to take effect.")
+	return nil
+}
+
+func cmdUninstallExtension(args []string) error {
+	if len(args) < 1 {
+		return errors.New("usage: browser-proxy uninstall-extension <browser>")
+	}
+	path, removed, err := platform.UninstallNativeMessagingHost(args[0])
+	if err != nil {
+		return err
+	}
+	if !removed {
+		fmt.Printf("Nothing to remove (no manifest at %s).\n", path)
+		return nil
+	}
+	fmt.Printf("Removed: %s\n", path)
+	return nil
 }

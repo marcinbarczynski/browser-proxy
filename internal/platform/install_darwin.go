@@ -17,7 +17,7 @@ const (
 	bundleName     = "Browser Proxy"
 	bundleID       = "com.maxischmaxi.browser-proxy"
 	bundleExec     = "browser-proxy"
-	bundleVersion  = "0.9.0"
+	bundleVersion  = "1.0.0"
 	lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 )
 
@@ -164,16 +164,33 @@ func Install() error {
 	fmt.Printf("Installed: %s\n\n", bundle)
 	fmt.Println("Now set Browser Proxy as your default browser:")
 	fmt.Println("  System Settings → Desktop & Dock → Default web browser → Browser Proxy")
+
+	// Install never touches ~/.config/browser-proxy/config.toml — that's
+	// `init`'s job. We only place the in-browser extension assets and wire
+	// up native messaging for browsers that already exist on this machine.
+	chromeDir, registered, err := InstallExtensionAssetsAndRegister()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: extension setup failed: %v\n", err)
+		return nil
+	}
+	PrintExtensionSetup(chromeDir, registered)
 	return nil
 }
 
-// Uninstall deletes the bundle from ~/Applications.
+// Uninstall deletes the bundle from ~/Applications and removes any
+// in-browser-extension assets and native-messaging registrations that
+// `install` set up. Leaves config.toml alone.
 func Uninstall() error {
 	bundle := bundlePath()
 	if err := os.RemoveAll(bundle); err != nil {
 		return err
 	}
 	fmt.Printf("Removed: %s\n", bundle)
+
+	for _, p := range UninstallExtensionAssetsAndUnregister() {
+		fmt.Printf("Removed: %s\n", p)
+	}
+
 	fmt.Println("Pick a new default browser in System Settings.")
 	return nil
 }
