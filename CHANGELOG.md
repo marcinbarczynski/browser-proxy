@@ -5,6 +5,34 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-05-06
+
+### Changed
+
+- **Only intercept link clicks**, not address-bar input. Previously the
+  extension intercepted every top-level navigation, which meant typing
+  `youtube.com` into Chrome's address bar (in profile A) would redirect
+  the navigation to whatever the routing rule said (e.g. profile B) —
+  the user explicitly chose this browser/profile by typing here, so
+  hijacking it was wrong.
+
+  Now only `transitionType === "link"` navigations are routed. Address
+  bar (`typed`/`generated`), bookmarks (`auto_bookmark`), reloads,
+  form submits, and back/forward all stay in the originating browser.
+
+### Notes
+
+- Implementation moved from `webNavigation.onBeforeNavigate` to
+  `webNavigation.onCommitted` — the latter is the only event that
+  exposes `transitionType`. The trade-off: by the time we tear down
+  the navigation, the destination URL has already begun loading. In
+  practice this is a brief flicker (or imperceptible on fast networks).
+- New-tab detection (target=_blank, cmd-click, window.open) now uses
+  `webNavigation.onCreatedNavigationTarget` instead of inspecting
+  `tab.url` — the v1.0.1 heuristic ("is the tab on about:blank?")
+  always reported false at onCommitted because tab.url is already the
+  destination URL by then.
+
 ## [1.0.1] - 2026-05-06
 
 Critical bug-fix release. v1.0.0 had a tab-cascade bug that could brick a
@@ -167,6 +195,7 @@ based on a TOML config.
 - GitHub Actions release pipeline (Linux amd64/arm64,
   macOS amd64/arm64).
 
+[1.0.2]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/maxischmaxi/browser-proxy/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/maxischmaxi/browser-proxy/compare/v0.8.0...v0.9.0

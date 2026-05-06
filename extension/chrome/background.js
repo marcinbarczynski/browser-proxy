@@ -1,20 +1,25 @@
 // Browser Proxy — Chrome MV3 service worker.
 //
-// Hooks every top-level navigation, asks the native-messaging host whether
-// the URL should be routed to a different browser, and — if yes — cancels
-// the in-Chrome navigation. The native host is the same `browser-proxy`
-// binary that handles default-browser clicks; it has already opened the URL
-// elsewhere by the time it answers, so all we have to do here is undo the
-// in-Chrome side.
+// Hooks top-level link-click navigations, asks the native-messaging host
+// whether the URL should be routed to a different browser, and — if yes
+// — undoes the in-Chrome side. The native host is the same `browser-proxy`
+// binary that handles default-browser clicks; it has already opened the
+// URL elsewhere by the time it answers.
+//
+// Routing decisions are deliberately limited to actual link clicks
+// (transitionType === "link"). Address-bar input, bookmarks, reloads,
+// form submits, and history navigation all stay in the originating
+// browser — the user is explicitly driving that browser, hijacking
+// would be hostile.
 //
 // Loop protection (lessons from v1.0.0):
 //
 // The v1.0.0 cascade happened when the host's routing decision named a
-// browser whose alias wasn't in CURRENT_BROWSERS — the host would then
-// "redirect" to that same browser the click came from, which spawns a
-// fresh tab, fires onBeforeNavigate again, and repeats exponentially.
-// We now have THREE independent defenses that any one of which is enough
-// to stop the cascade:
+// browser whose alias wasn't in CURRENT_BROWSERS — the host would
+// "redirect" to that same browser the click came from, spawning a fresh
+// tab, firing onBeforeNavigate again, and repeating exponentially. We
+// now have THREE independent defenses, any one of which is enough to
+// stop the cascade:
 //
 //   1. URL-keyed dedupe: if a URL was just redirected, ignore subsequent
 //      events for the same URL for RECENTLY_REDIRECTED_TTL_MS — regardless
@@ -112,10 +117,38 @@ async function confirmHostHandshake() {
 // itself triggering another onBeforeNavigate event we'd react to.
 const tearingDown = new Set();
 
-chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
+// We listen on onCommitted, not onBeforeNavigate, because transitionType
+// (the field that tells us "link click" vs "address bar typed" vs
+// "bookmark" vs "reload" vs "form submit" vs "back/forward") is only
+// populated on onCommitted. onBeforeNavigate doesn't expose it.
+//
+// The cost: by the time onCommitted fires the tab has started loading
+// the destination URL — we may flicker briefly before tearing it down.
+// The benefit: we can correctly leave address-bar typing, bookmarks,
+// reloads, and history navigation alone. Those represent the user
+// explicitly driving the current browser; routing them elsewhere is
+// hostile.
+//
+// Only "link" transitions are intercepted. Everything else passes
+// through to the originating browser unchanged.
+const ROUTABLE_TRANSITIONS = new Set(["link"]);
+
+// Tabs that were created by a link click (target=_blank, cmd-click,
+// window.open, etc). Tracked via onCreatedNavigationTarget so the
+// tear-down code knows to close the new tab rather than navigate it
+// back. Entries auto-expire after 30s in case onCommitted never fires.
+const freshFromLink = new Map();
+
+chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+  freshFromLink.set(details.tabId, Date.now());
+  setTimeout(() => freshFromLink.delete(details.tabId), 30_000);
+});
+
+chrome.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0) return;
   if (!/^https?:\/\//i.test(details.url)) return;
   if (tearingDown.has(details.tabId)) return;
+  if (!ROUTABLE_TRANSITIONS.has(details.transitionType)) return;
 
   // Defense 1
   if (wasRecentlyRedirected(details.url)) {
@@ -145,8 +178,12 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 
   rememberRedirected(details.url);
   tearingDown.add(details.tabId);
+  // Consume the freshness flag now so a follow-up onCommitted on the same
+  // tab id (after we tabs.update it back) doesn't see it.
+  const wasFresh = freshFromLink.has(details.tabId);
+  freshFromLink.delete(details.tabId);
   try {
-    await tearDownNavigation(details.tabId);
+    await tearDownNavigation(details.tabId, wasFresh);
   } catch (err) {
     console.warn("[Browser Proxy] tear-down failed:", err?.message ?? err);
   } finally {
@@ -157,14 +194,19 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
 // tearDownNavigation cancels the in-browser side of a navigation we just
 // redirected. Two cases:
 //
-//   1. Fresh tab — Chrome opened a new tab to load the URL (e.g. cmd-click,
-//      bookmark, link from another app). Closing it is the cleanest result.
-//      Special case: if it's the only tab in the window, replace with the
-//      newtab page so closing it doesn't quit the browser.
+//   1. Fresh tab — Chrome created a new tab for this navigation
+//      (target=_blank, cmd-click, window.open). Close it. Special case:
+//      if it's the only tab in the window, navigate to newtab so closing
+//      doesn't quit the browser.
 //   2. Existing tab — the user clicked a link on a page they were already
-//      on. We want to keep them on the prior page; goBack() does that, with
+//      on. Keep them on the prior page; goBack() does that, with
 //      about:blank as a fallback when there's nothing to go back to.
-async function tearDownNavigation(tabId) {
+//
+// We trust the wasFresh flag from onCreatedNavigationTarget — checking
+// tab.url no longer works here because by onCommitted tab.url is already
+// the destination URL, so the v1.0.1 "is it about:blank?" heuristic
+// always reported false.
+async function tearDownNavigation(tabId, wasFresh) {
   let tab;
   try {
     tab = await chrome.tabs.get(tabId);
@@ -172,14 +214,7 @@ async function tearDownNavigation(tabId) {
     return;
   }
 
-  const isFresh =
-    !tab.url ||
-    tab.url === "" ||
-    tab.url === "about:blank" ||
-    tab.url === "chrome://newtab/" ||
-    tab.url === "edge://newtab/";
-
-  if (isFresh) {
+  if (wasFresh) {
     const tabs = await chrome.tabs.query({ windowId: tab.windowId });
     if (tabs.length <= 1) {
       await chrome.tabs.update(tabId, { url: "chrome://newtab/" });
