@@ -15,12 +15,28 @@ import (
 
 const (
 	bundleName     = "Browser Proxy"
-	bundleID       = "dev.local.browser-proxy"
+	bundleID       = "com.maxischmaxi.browser-proxy"
 	bundleExec     = "browser-proxy"
-	bundleVersion  = "0.1.0"
+	bundleVersion  = "0.9.0"
 	lsregisterPath = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 )
 
+// Info.plist for a default-browser-eligible app. The combination of fields
+// here is what macOS' "Default web browser" picker in System Settings looks
+// for — every one of them is load-bearing:
+//
+//   - CFBundleTypeRole=Viewer + LSHandlerRank inside CFBundleURLTypes:
+//     without these, Launch Services marks the URL handler as incomplete
+//     and the app is hidden from the picker.
+//   - CFBundleDocumentTypes for public.html / public.url: macOS additionally
+//     filters by HTML-viewer capability when populating the browser list.
+//   - NSPrincipalClass=NSApplication: we drive a real Cocoa event loop, so
+//     this must be declared or the bundle is treated as a non-GUI tool.
+//   - NSAppleEventsUsageDescription: required from macOS Mojave on, otherwise
+//     the very first kAEGetURL event triggers a privacy prompt the user has
+//     no context to accept.
+//   - LSUIElement=true keeps us out of the Dock; that's compatible with being
+//     a default browser (Finicky uses the same combination).
 const infoPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -42,18 +58,47 @@ const infoPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.13</string>
+    <string>10.15</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Browser Proxy receives URL open events from other apps so it can route them to the configured browser.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
             <key>CFBundleURLName</key>
-            <string>HTTP/HTTPS Handler</string>
+            <string>Web URL</string>
             <key>CFBundleURLSchemes</key>
             <array>
                 <string>http</string>
                 <string>https</string>
+            </array>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>HTML document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.html</string>
+                <string>public.xhtml</string>
+                <string>public.url</string>
             </array>
         </dict>
     </array>
