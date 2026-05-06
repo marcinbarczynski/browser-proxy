@@ -7,14 +7,30 @@
 // elsewhere by the time it answers, so all we have to do here is undo the
 // in-Chrome side.
 //
-// Native host name MUST match platform.NativeMessagingHostName in the Go
-// code; the manifest under NativeMessagingHosts/ is keyed by it.
+// Loop protection (lessons from v1.0.0):
+//
+// The v1.0.0 cascade happened when the host's routing decision named a
+// browser whose alias wasn't in CURRENT_BROWSERS — the host would then
+// "redirect" to that same browser the click came from, which spawns a
+// fresh tab, fires onBeforeNavigate again, and repeats exponentially.
+// We now have THREE independent defenses that any one of which is enough
+// to stop the cascade:
+//
+//   1. URL-keyed dedupe: if a URL was just redirected, ignore subsequent
+//      events for the same URL for RECENTLY_REDIRECTED_TTL_MS — regardless
+//      of which tab they fire in. The v1.0.0 cache was tabId-keyed and
+//      never matched cascade tabs (each new tab has a new id).
+//   2. Global rate limit: at most MAX_CALLS_PER_WINDOW host calls per
+//      RATE_WINDOW_MS. Once the limit is exceeded we fail open for
+//      RATE_COOLDOWN_MS so even a pathological loop terminates within ~1s.
+//   3. Ping handshake on first request: the host MUST acknowledge a {ping}
+//      message before we send routable URLs. If a v1.0.0 host is somehow
+//      still installed and ignores ping, we never call it.
 
 const NATIVE_HOST = "com.maxischmaxi.browser_proxy";
 
 // What the native host should compare its routing decision against to know
-// "the click came from me, don't bounce it back". Order doesn't matter; the
-// host does case-insensitive matching against any one of these.
+// "the click came from me, don't bounce it back".
 const CURRENT_BROWSERS = [
   "Google Chrome",
   "Chrome",
@@ -22,39 +38,97 @@ const CURRENT_BROWSERS = [
   "google-chrome-stable",
 ];
 
+// Defense 1: URL-keyed dedupe (cross-tab, with TTL).
+const recentlyRedirected = new Map(); // url -> timestamp
+const RECENTLY_REDIRECTED_TTL_MS = 10_000;
+
+function wasRecentlyRedirected(url) {
+  const ts = recentlyRedirected.get(url);
+  if (ts === undefined) return false;
+  if (Date.now() - ts > RECENTLY_REDIRECTED_TTL_MS) {
+    recentlyRedirected.delete(url);
+    return false;
+  }
+  return true;
+}
+
+function rememberRedirected(url) {
+  recentlyRedirected.set(url, Date.now());
+}
+
+// Defense 2: global call-rate limiter.
+const callTimestamps = [];
+const MAX_CALLS_PER_WINDOW = 10;
+const RATE_WINDOW_MS = 3_000;
+const RATE_COOLDOWN_MS = 10_000;
+let cooldownUntil = 0;
+
+function rateLimitOK() {
+  const now = Date.now();
+  if (now < cooldownUntil) return false;
+  while (callTimestamps.length && callTimestamps[0] < now - RATE_WINDOW_MS) {
+    callTimestamps.shift();
+  }
+  if (callTimestamps.length >= MAX_CALLS_PER_WINDOW) {
+    cooldownUntil = now + RATE_COOLDOWN_MS;
+    console.warn(
+      `[Browser Proxy] rate limit hit (${MAX_CALLS_PER_WINDOW} calls in ` +
+        `${RATE_WINDOW_MS}ms) — failing open for ${RATE_COOLDOWN_MS}ms. ` +
+        "This usually means the native host is mis-routing; check your " +
+        "config.toml's `default` and rule browser names against the " +
+        "actual binary names on this OS."
+    );
+    return false;
+  }
+  callTimestamps.push(now);
+  return true;
+}
+
+// Defense 3: confirm with the host that it speaks the v1.0.1+ protocol
+// before we ever ship it a real URL. Cached in chrome.storage.session.
+let pingPromise = null;
+
+async function confirmHostHandshake() {
+  if (pingPromise) return pingPromise;
+  pingPromise = (async () => {
+    try {
+      const resp = await chrome.runtime.sendNativeMessage(NATIVE_HOST, {
+        ping: true,
+      });
+      return resp && resp.ok === true;
+    } catch {
+      return false;
+    }
+  })();
+  // Re-probe periodically so a freshly-installed host is picked up without
+  // requiring a Chrome restart.
+  setTimeout(() => {
+    pingPromise = null;
+  }, 60_000);
+  return pingPromise;
+}
+
 // Tab IDs we're currently tearing down — guards against the close/goBack
 // itself triggering another onBeforeNavigate event we'd react to.
 const tearingDown = new Set();
 
-// Per-tab bookkeeping so we don't double-handle the same URL when Chrome
-// fires the listener twice (it does, e.g. for committed-then-error transitions).
-const recentlyHandled = new Map(); // key=tabId -> {url, ts}
-const RECENT_TTL_MS = 5_000;
-
-function rememberHandled(tabId, url) {
-  recentlyHandled.set(tabId, { url, ts: Date.now() });
-}
-
-function wasJustHandled(tabId, url) {
-  const entry = recentlyHandled.get(tabId);
-  if (!entry) return false;
-  if (Date.now() - entry.ts > RECENT_TTL_MS) {
-    recentlyHandled.delete(tabId);
-    return false;
-  }
-  return entry.url === url;
-}
-
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  // Top-level only — iframes/subframes inherit the top-level decision.
   if (details.frameId !== 0) return;
-
-  // Schemes other than http(s) (chrome://, file://, devtools://, …) are
-  // never something we want to bounce.
   if (!/^https?:\/\//i.test(details.url)) return;
-
   if (tearingDown.has(details.tabId)) return;
-  if (wasJustHandled(details.tabId, details.url)) return;
+
+  // Defense 1
+  if (wasRecentlyRedirected(details.url)) {
+    return;
+  }
+  // Defense 2
+  if (!rateLimitOK()) {
+    return;
+  }
+  // Defense 3
+  if (!(await confirmHostHandshake())) {
+    return;
+  }
 
   let resp;
   try {
@@ -63,16 +137,13 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
       current_browsers: CURRENT_BROWSERS,
     });
   } catch (err) {
-    // Native host not installed, daemon crashed, manifest missing — fail
-    // open: let the navigation proceed in-browser. We log to the SW console
-    // so users can find it via chrome://serviceworker-internals.
     console.warn("[Browser Proxy] native host error:", err?.message ?? err);
     return;
   }
 
   if (!resp || !resp.redirect) return;
 
-  rememberHandled(details.tabId, details.url);
+  rememberRedirected(details.url);
   tearingDown.add(details.tabId);
   try {
     await tearDownNavigation(details.tabId);
@@ -83,12 +154,14 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   }
 });
 
-// tearDownNavigation cancels the navigation we just intercepted. There are
-// two cases:
+// tearDownNavigation cancels the in-browser side of a navigation we just
+// redirected. Two cases:
 //
 //   1. Fresh tab — Chrome opened a new tab to load the URL (e.g. cmd-click,
 //      bookmark, link from another app). Closing it is the cleanest result.
-//   2. Existing tab — the user clicked a link in a page they were already
+//      Special case: if it's the only tab in the window, replace with the
+//      newtab page so closing it doesn't quit the browser.
+//   2. Existing tab — the user clicked a link on a page they were already
 //      on. We want to keep them on the prior page; goBack() does that, with
 //      about:blank as a fallback when there's nothing to go back to.
 async function tearDownNavigation(tabId) {
@@ -96,7 +169,7 @@ async function tearDownNavigation(tabId) {
   try {
     tab = await chrome.tabs.get(tabId);
   } catch {
-    return; // tab already gone
+    return;
   }
 
   const isFresh =
@@ -107,8 +180,6 @@ async function tearDownNavigation(tabId) {
     tab.url === "edge://newtab/";
 
   if (isFresh) {
-    // If this is the only tab in the window, closing it closes the window.
-    // Replace with newtab instead in that case so Chrome doesn't quit.
     const tabs = await chrome.tabs.query({ windowId: tab.windowId });
     if (tabs.length <= 1) {
       await chrome.tabs.update(tabId, { url: "chrome://newtab/" });
@@ -125,12 +196,12 @@ async function tearDownNavigation(tabId) {
   }
 }
 
-// Periodically prune stale recently-handled entries. The TTL check on read
-// already keeps things correct, but this stops the map from growing
-// unboundedly when the SW stays warm.
+// Periodic prune so the dedupe map can't grow unbounded if the SW stays
+// warm for a long session. The TTL check on read already keeps things
+// correct; this just bounds memory.
 setInterval(() => {
   const now = Date.now();
-  for (const [k, v] of recentlyHandled) {
-    if (now - v.ts > RECENT_TTL_MS) recentlyHandled.delete(k);
+  for (const [k, ts] of recentlyRedirected) {
+    if (now - ts > RECENTLY_REDIRECTED_TTL_MS) recentlyRedirected.delete(k);
   }
 }, 60_000);

@@ -7,12 +7,17 @@ async function ping() {
   status.textContent = "Pinging native host…";
   status.className = "status";
   try {
+    // Send a dedicated {ping:true} probe so the host short-circuits this
+    // without going through routing / opener.Open. Sending a real URL here
+    // was the v1.0.0 bug that triggered the tab-cascade.
     const resp = await chrome.runtime.sendNativeMessage(NATIVE_HOST, {
-      url: "https://browser-proxy.invalid/__ping__",
-      current_browsers: ["__ping__"],
+      ping: true,
     });
-    if (resp && resp.error) {
-      status.textContent = "Host responded with error: " + resp.error;
+    if (!resp || !resp.ok) {
+      status.textContent =
+        "Host responded but didn't acknowledge the ping" +
+        (resp && resp.error ? `: ${resp.error}` : "") +
+        " — your daemon may be older than v1.0.1.";
       status.className = "status err";
       return;
     }
@@ -22,7 +27,7 @@ async function ping() {
     status.textContent =
       "Native host not reachable: " +
       (err?.message ?? String(err)) +
-      " — run `browser-proxy install-extension chrome <id>` and reload the extension.";
+      " — run `browser-proxy install-extension <browser>` and reload the extension.";
     status.className = "status err";
   }
 }

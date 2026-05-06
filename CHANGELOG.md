@@ -5,6 +5,45 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-05-06
+
+Critical bug-fix release. v1.0.0 had a tab-cascade bug that could brick a
+Chromium browser when the routing decision named a browser whose alias
+wasn't in the extension's hardcoded `CURRENT_BROWSERS` list — the host
+would "redirect" to that same browser the click came from, spawning a
+fresh tab, firing `onBeforeNavigate` again, and repeating exponentially.
+
+Triggered most easily by clicking the extension's toolbar icon: the
+v1.0.0 popup pinged the host with a real URL and `current_browsers:
+["__ping__"]`, which made the host treat the probe as a routable click
+and open the URL in the configured default — kicking off the cascade
+even if the user's setup was otherwise correct.
+
+### Fixed
+
+- **Popup health-check no longer routes**: `popup.js` now sends a
+  dedicated `{ping: true}` message; the host short-circuits with
+  `{ok: true}` without touching the routing pipeline or invoking
+  `opener.Open`.
+- **URL-keyed dedupe** in `background.js`: if a URL was just redirected,
+  subsequent `onBeforeNavigate` events for the same URL are ignored for
+  10 s — across tabs. v1.0.0's tabId-keyed cache could never match the
+  cascade tabs since each new tab had a fresh id.
+- **Global rate limit** in `background.js`: at most 10 host calls per
+  3 s window. When exceeded, the extension fails open for 10 s. Bounds
+  any pathological loop to ~1 s of work.
+- **Ping handshake** in `background.js`: before sending any routable URL
+  to the host, the extension confirms the host responds to `{ping}` with
+  `{ok: true}`. A v1.0.0-era host that ignores ping is never invoked.
+
+### Notes
+
+- If you installed v1.0.0 and got hit by the cascade: stop Chrome, run
+  `browser-proxy uninstall-extension <browser>` for every Chromium-family
+  browser, upgrade to v1.0.1, then `browser-proxy install` again. The
+  extension files extracted by v1.0.0 should be replaced by the v1.0.1
+  ones automatically when `install` re-runs.
+
 ## [1.0.0] - 2026-05-06
 
 First stable release. Adds in-browser routing via a companion Chrome
@@ -128,6 +167,7 @@ based on a TOML config.
 - GitHub Actions release pipeline (Linux amd64/arm64,
   macOS amd64/arm64).
 
+[1.0.1]: https://github.com/maxischmaxi/browser-proxy/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/maxischmaxi/browser-proxy/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/maxischmaxi/browser-proxy/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/maxischmaxi/browser-proxy/compare/v0.7.0...v0.8.0

@@ -33,6 +33,12 @@ type Request struct {
 	// "Chrome", "google-chrome"]; the Brave build sends Brave-flavoured
 	// aliases. The handler uses this to decide passthrough vs redirect.
 	CurrentBrowsers []string `json:"current_browsers,omitempty"`
+	// Ping marks a connectivity probe — the host MUST short-circuit and
+	// return Response{OK: true} without touching the routing pipeline or
+	// invoking opener.Open. The popup's "Test connection" button uses this.
+	// Treating ping requests as routable was the v1.0.0 bug that triggered
+	// the tab-cascade.
+	Ping bool `json:"ping,omitempty"`
 }
 
 // IsCurrentBrowser reports whether name (case-insensitive) is one of the
@@ -50,12 +56,14 @@ func (r Request) IsCurrentBrowser(name string) bool {
 //
 // Redirect=true means the host has already opened the URL elsewhere; the
 // extension must cancel the in-browser navigation. Redirect=false means
-// the extension should let the navigation proceed.
+// the extension should let the navigation proceed. OK is set on successful
+// ping responses.
 type Response struct {
 	Redirect bool   `json:"redirect"`
 	Browser  string `json:"browser,omitempty"`
 	Profile  string `json:"profile,omitempty"`
 	Error    string `json:"error,omitempty"`
+	OK       bool   `json:"ok,omitempty"`
 }
 
 // Handler decides what to do with one Request. It must always return a

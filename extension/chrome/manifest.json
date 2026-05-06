@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Browser Proxy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Routes in-browser link clicks through the browser-proxy daemon, redirecting to the configured browser when rules match.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAp0IkgeJ36WCpVHeblDH4gBHWkFE+0+Pn1FXHekjgazsRHSMMYkMsic8X2fWMtja5E/JMeBNCvIONRPrfc4Sniq4Hgdve/7qrRZfXgy1ToAxhlZSPXPlA1WjfML+7nd8mbc4CVWU90hU3rQSn6/GdZWrucQ5sSfMgX3Bc9Wgyiz1M1PyGA8dDu5/jnHzJFekcq/9D6bzHgq5nyOHMpWUZdiZxxQw4LF3sYYW1RrEPY3TV977uDXf5xOnfyuCIofbn3FPEr1pbBRn2Fkv9bN9/WCUZMzvF5pfBqkPzqqGXS8zl/vm+Z6le5HMTAJwGzVLNjwtSpFzDDc1cNl9e/5YCXQIDAQAB",
   "permissions": [

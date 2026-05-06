@@ -153,3 +153,27 @@ func TestIsCurrentBrowser(t *testing.T) {
 		}
 	}
 }
+
+func TestPingRequestRoundtrip(t *testing.T) {
+	in := encode(t, Request{Ping: true})
+	var out bytes.Buffer
+	called := false
+	err := run(bytes.NewReader(in), &out, func(req Request) Response {
+		called = true
+		if !req.Ping {
+			t.Errorf("Ping = false, want true")
+		}
+		// Pretend handler does the right thing — short-circuit with OK.
+		return Response{OK: true}
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !called {
+		t.Fatal("handler not invoked")
+	}
+	got := decode(t, out.Bytes())
+	if len(got) != 1 || !got[0].OK || got[0].Redirect {
+		t.Errorf("response = %+v", got)
+	}
+}

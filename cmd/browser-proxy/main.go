@@ -19,7 +19,7 @@ import (
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
 // Local builds report this default; CI release builds report the git tag.
-var Version = "1.0.0"
+var Version = "1.0.1"
 
 const usage = `browser-proxy — route URLs to the right browser
 
@@ -343,6 +343,12 @@ func cmdNativeHost() error {
 	defer cfg.Close()
 
 	return nativehost.Run(func(req nativehost.Request) nativehost.Response {
+		// Connectivity probe from the extension popup. MUST short-circuit
+		// here — passing the ping URL through the routing pipeline was the
+		// v1.0.0 bug that triggered the tab-cascade.
+		if req.Ping {
+			return nativehost.Response{OK: true}
+		}
 		if req.URL == "" {
 			return nativehost.Response{Error: "empty url"}
 		}
