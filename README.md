@@ -12,6 +12,35 @@ and statically declared in TOML rather than JS.
 
 ## Install
 
+`browser-proxy` runs on Linux and macOS. Pick whichever route fits your setup:
+
+- [**Arch Linux (AUR)**](#arch-linux-aur) — `yay -S browser-proxy`
+- [**Install script**](#install-script) — one-liner for any Linux/macOS
+- [**Manual download**](#manual-download) — fetch a release binary yourself
+- [**Build from source**](#build-from-source)
+
+### Arch Linux (AUR)
+
+Published to the AUR as [`browser-proxy`](https://aur.archlinux.org/packages/browser-proxy).
+With an AUR helper:
+
+```sh
+yay -S browser-proxy        # or: paru -S browser-proxy
+```
+
+…or build it by hand:
+
+```sh
+git clone https://aur.archlinux.org/browser-proxy.git
+cd browser-proxy
+makepkg -si
+```
+
+The package builds from source (`makedepends=go`) and is bumped automatically
+on every tagged release.
+
+### Install script
+
 One-line install of the latest release for your OS/arch:
 
 ```sh
@@ -31,7 +60,7 @@ BROWSER_PROXY_DEST=$HOME/bin \
   curl -fsSL https://raw.githubusercontent.com/maxischmaxi/browser-proxy/main/install.sh | sh
 ```
 
-### Manual install
+### Manual download
 
 Download the asset for your platform from the
 [releases page](https://github.com/maxischmaxi/browser-proxy/releases),
@@ -349,3 +378,7 @@ happen inside a browser, the practical options today are:
   for `http`/`https`. The binary inside listens to `kInternetEventClass` /
   `kAEGetURL` Apple Events via `NSAppleEventManager` (cgo + Cocoa) and stays
   resident as a `LSUIElement` background app — no Dock icon.
+
+## License
+
+[MIT](LICENSE).

@@ -1,0 +1,66 @@
+name: Publish to AUR
+
+# Push an updated PKGBUILD (+ regenerated .SRCINFO) to the AUR on every v* tag.
+#
+# The PKGBUILD lives on the default branch and is version-agnostic: this job
+# stamps `pkgver` from the tag and lets the source= line pull the matching
+# release tarball by URL. That's why we always check out `main` for the
+# template rather than the tag tree — so even a tag created before the
+# packaging existed can still be published via the manual trigger below.
+#
+# Manual run (workflow_dispatch): use this for the very first publish, once the
+# public deploy key is registered on the AUR account.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re)publish, e.g. v1.2.0'
+        required: true
+
+jobs:
+  publish:
+    name: Publish browser-proxy to the AUR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${INPUT_TAG:-$REF_NAME}"
+          # Strict allow-list: refuse anything that isn't a vX.Y.Z(-suffix) tag.
+          # Also neutralises GITHUB_OUTPUT injection via a crafted dispatch input.
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::Refusing to publish: '$tag' is not a vX.Y.Z tag" >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out PKGBUILD template
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Stamp version into PKGBUILD
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" packaging/aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" packaging/aur/PKGBUILD
+
+      - name: Publish to the AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.3
+        with:
+          pkgname: browser-proxy
+          pkgbuild: packaging/aur/PKGBUILD
+          updpkgsums: true
+          commit_username: maxischmaxi
+          commit_email: max@jeschek.dev
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "browser-proxy ${{ steps.tag.outputs.tag }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519

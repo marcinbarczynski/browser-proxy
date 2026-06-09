@@ -19,6 +19,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Documented Teams as a `source` value, including the macOS bundle IDs
     `com.microsoft.teams2` (new Teams) and `com.microsoft.teams` (classic),
     plus an example rule in the `init` config.
+- Arch Linux packaging: an AUR `browser-proxy` package (`packaging/aur/PKGBUILD`,
+  built from source) plus a `Publish to AUR` workflow that stamps the version
+  from the tag and pushes an updated PKGBUILD + `.SRCINFO` on every release.
+- A `LICENSE` file (MIT).
 
 ## [1.1.0] - 2026-05-06
 
