@@ -146,6 +146,73 @@ func TestSafeLinks_NotARealSafeLinksHost(t *testing.T) {
 	}
 }
 
+// ── Microsoft Teams Safe Links interstitial ───────────────────────────────
+
+func TestUnwrapTeamsSafeLinks(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{
+			"basic interstitial",
+			"https://statics.teams.cdn.office.net/evergreen-assets/safelinks/1/atp-safelinks.html?url=https%3A%2F%2Fexample.com%2Fpage&locale=en-us&dest=https%3A%2F%2Fteams.microsoft.com%2Fapi&pc=abc",
+			"https://example.com/page",
+		},
+		{
+			"capitalised host",
+			"https://STATICS.TEAMS.CDN.OFFICE.NET/evergreen-assets/safelinks/1/atp-safelinks.html?url=https%3A%2F%2Fexample.com",
+			"https://example.com",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := unwrapOnce(c.in)
+			if !ok {
+				t.Fatalf("expected unwrap")
+			}
+			if got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestTeamsSafeLinks_NoURLParam(t *testing.T) {
+	in := "https://statics.teams.cdn.office.net/evergreen-assets/safelinks/1/atp-safelinks.html?dest=abc"
+	if _, ok := unwrapOnce(in); ok {
+		t.Errorf("must not unwrap without url param")
+	}
+}
+
+func TestTeamsSafeLinks_WrongPath(t *testing.T) {
+	// Same CDN host, but not a safelinks asset.
+	in := "https://statics.teams.cdn.office.net/evergreen-assets/icons/foo.png?url=https://x.com"
+	if _, ok := unwrapOnce(in); ok {
+		t.Errorf("must not unwrap non-safelinks path on the Teams CDN")
+	}
+}
+
+func TestTeamsSafeLinks_LookAlikeHost(t *testing.T) {
+	in := "https://statics.teams.cdn.office.net.attacker.com/evergreen-assets/safelinks/1/atp-safelinks.html?url=https://x.com"
+	if _, ok := unwrapOnce(in); ok {
+		t.Errorf("must not unwrap attacker-controlled host")
+	}
+}
+
+func TestUnwrapTeams_DoubleInterstitial(t *testing.T) {
+	// Teams occasionally wraps its own interstitial inside another one.
+	inner := "https://www.linkedin.com/"
+	once := "https://statics.teams.cdn.office.net/evergreen-assets/safelinks/1/atp-safelinks.html?url=" + url.QueryEscape(inner)
+	twice := "https://statics.teams.cdn.office.net/evergreen-assets/safelinks/1/atp-safelinks.html?url=" + url.QueryEscape(once)
+
+	got, changed := unwrapAll(twice)
+	if !changed {
+		t.Fatal("expected unwrapAll to change the URL")
+	}
+	if got != inner {
+		t.Errorf("after recursive unwrap: got %q, want %q", got, inner)
+	}
+}
+
 // ── Google /url ───────────────────────────────────────────────────────────
 
 func TestUnwrapGoogleURL(t *testing.T) {

@@ -210,8 +210,9 @@ force_https = true
 
 # Built-in: peel off known wrapper URLs so routing rules see the actual target.
 # Recognized wrappers: Slack OIDC (login_initiate_redirect), Microsoft Safe
-# Links (Outlook/Teams *.safelinks.protection.outlook.com), Google /url
-# (Gmail), LinkedIn /redir, Facebook l.php, YouTube /redirect.
+# Links (Outlook *.safelinks.protection.outlook.com), Microsoft Teams Safe
+# Links interstitial (statics.teams.cdn.office.net/.../atp-safelinks.html),
+# Google /url (Gmail), LinkedIn /redir, Facebook l.php, YouTube /redirect.
 # Set to false to disable.
 unwrap_redirects = true
 
@@ -257,6 +258,14 @@ browser = "Preview"
 
 [[rules]]
 source = "Slack"
+browser = "Google Chrome"
+profile = "Work"
+
+# Every link clicked from Microsoft Teams opens in Chrome's Work profile.
+# macOS: also matchable by bundle ID "com.microsoft.teams2" (new Teams) or
+# "com.microsoft.teams" (classic).
+[[rules]]
+source = "Microsoft Teams"
 browser = "Google Chrome"
 profile = "Work"
 

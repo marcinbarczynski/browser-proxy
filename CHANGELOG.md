@@ -5,6 +5,21 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-06-09
+
+### Added
+
+- Microsoft Teams support, mirroring Slack:
+  - New built-in unwrapper `teams-safelinks` peels the Teams ATP
+    "Verifying Link…" interstitial
+    (`statics.teams.cdn.office.net/evergreen-assets/safelinks/…/atp-safelinks.html?url=…`),
+    so routing rules match the real destination. Distinct from the
+    Outlook `*.safelinks.protection.outlook.com` host, and nested/double
+    interstitials are peeled by the existing recursive unwrap.
+  - Documented Teams as a `source` value, including the macOS bundle IDs
+    `com.microsoft.teams2` (new Teams) and `com.microsoft.teams` (classic),
+    plus an example rule in the `init` config.
+
 ## [1.1.0] - 2026-05-06
 
 Removes the in-browser routing feature entirely. The Chrome companion

@@ -114,6 +114,11 @@ browser = "Preview"
 source = "Slack"
 browser = "Google Chrome"
 
+# Same for Microsoft Teams.
+[[rules]]
+source = "Microsoft Teams"
+browser = "Google Chrome"
+
 # Combined: docs.* links FROM Mail go to Safari.
 [[rules]]
 prefix = "https://docs."
@@ -144,9 +149,10 @@ if you really want apex/sub split.
 
 The originating app. Matching is case-insensitive.
 
-- **macOS**: app name (`"Slack"`, `"Mail"`) **or** bundle ID
-  (`"com.tinyspeck.slackmacgap"`). The dot-bearing form is interpreted as a
-  bundle ID; everything else as `localizedName`.
+- **macOS**: app name (`"Slack"`, `"Microsoft Teams"`, `"Mail"`) **or** bundle
+  ID (`"com.tinyspeck.slackmacgap"`; Teams: `"com.microsoft.teams2"` for new
+  Teams, `"com.microsoft.teams"` for classic). The dot-bearing form is
+  interpreted as a bundle ID; everything else as `localizedName`.
 - **Linux**: process name (`comm`) of the first non-launcher ancestor of this
   binary. Bundle IDs have no meaning here. Detection works best for apps that
   invoke `xdg-open`/`gio launch` directly; sandboxed/portal-based launches may
@@ -206,7 +212,8 @@ on the real destination. Recognised wrappers:
 | Source                   | Pattern                                              | Where it lives           |
 | ------------------------ | ---------------------------------------------------- | ------------------------ |
 | **Slack** "Sign in with Slack" | `slack.com/openid/connect/login_initiate_redirect?login_hint=<JWT>` | JWT payload `target_uri` claim |
-| **Microsoft Safe Links** (Outlook + Teams) | `*.safelinks.protection.outlook.com/?url=…` | `url` query param        |
+| **Microsoft Safe Links** (Outlook) | `*.safelinks.protection.outlook.com/?url=…` | `url` query param        |
+| **Microsoft Teams** Safe Links interstitial | `statics.teams.cdn.office.net/evergreen-assets/safelinks/…/atp-safelinks.html?url=…` | `url` query param        |
 | **Google**               | `www.google.com/url?q=…` (Gmail, Calendar, Search)   | `q` (or `url`) param     |
 | **LinkedIn**             | `www.linkedin.com/redir/redirect?url=…`              | `url` param              |
 | **Facebook**             | `l.facebook.com/l.php?u=…` (and `lm.facebook.com`)   | `u` param                |

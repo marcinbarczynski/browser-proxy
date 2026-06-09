@@ -19,6 +19,10 @@ import (
 //   - Microsoft Defender for Office 365 Safe Links (Outlook, Teams):
 //     https://*.safelinks.protection.outlook.com/?url=<encoded>&data=…
 //
+//   - Microsoft Teams Safe Links interstitial ("Verifying Link…"):
+//     https://statics.teams.cdn.office.net/evergreen-assets/safelinks/1/atp-safelinks.html?url=<encoded>&dest=…&pc=…
+//     where the clicked destination is in the "url" query param.
+//
 //   - Google URL wrapper (Gmail, Calendar, Search results):
 //     https://www.google.com/url?q=<encoded>&sa=…
 //
@@ -42,6 +46,7 @@ type unwrapper struct {
 var builtinUnwrappers = []unwrapper{
 	{"slack-oidc", unwrapSlackOIDC},
 	{"microsoft-safelinks", unwrapMicrosoftSafeLinks},
+	{"teams-safelinks", unwrapTeamsSafeLinks},
 	{"google-url", unwrapGoogleURL},
 	{"linkedin-redir", unwrapLinkedIn},
 	{"facebook-l", unwrapFacebook},
@@ -138,6 +143,25 @@ func unwrapSlackOIDC(u *url.URL) (string, bool) {
 func unwrapMicrosoftSafeLinks(u *url.URL) (string, bool) {
 	if !hostEquals(u, "safelinks.protection.outlook.com") &&
 		!hostHasSuffix(u, ".safelinks.protection.outlook.com") {
+		return "", false
+	}
+	target := u.Query().Get("url")
+	return target, target != ""
+}
+
+// ── Microsoft Teams Safe Links interstitial ───────────────────────────────
+
+// unwrapTeamsSafeLinks peels the Teams ATP "Verifying Link…" interstitial that
+// Teams routes outbound clicks through. It lives on the Office CDN — a
+// different host than Outlook's *.safelinks.protection.outlook.com — so it
+// needs its own handler. The clicked destination is in the "url" query param.
+// Teams sometimes nests this page inside itself (a double interstitial);
+// unwrapAll's recursion peels each layer.
+func unwrapTeamsSafeLinks(u *url.URL) (string, bool) {
+	if !hostEquals(u, "statics.teams.cdn.office.net") {
+		return "", false
+	}
+	if !strings.HasPrefix(u.Path, "/evergreen-assets/safelinks/") {
 		return "", false
 	}
 	target := u.Query().Get("url")
