@@ -5,6 +5,24 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-09
+
+### Added
+
+- `install.sh` gained an **uninstall** mode:
+  `curl -fsSL …/install.sh | sh -s -- uninstall` (or `BROWSER_PROXY_UNINSTALL=1`).
+  It unregisters the default-browser handler (`browser-proxy uninstall`) and
+  then deletes the script-installed binary from `/usr/local/bin`,
+  `~/.local/bin` or `$BROWSER_PROXY_DEST` — using `sudo` only when the target
+  directory isn't writable. The config file is left untouched. Package-manager
+  installs (e.g. the AUR package) are not removed — use the package manager
+  for those.
+
+### Notes
+
+- The binary is functionally identical to 1.2.0; this release exists to ship
+  the installer change and the AUR package.
+
 ## [1.2.0] - 2026-06-09
 
 ### Added

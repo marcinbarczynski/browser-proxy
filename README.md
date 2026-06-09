@@ -18,6 +18,7 @@ and statically declared in TOML rather than JS.
 - [**Install script**](#install-script) — one-liner for any Linux/macOS
 - [**Manual download**](#manual-download) — fetch a release binary yourself
 - [**Build from source**](#build-from-source)
+- [**Uninstall**](#uninstall) — remove an install-script copy
 
 ### Arch Linux (AUR)
 
@@ -74,6 +75,33 @@ curl -fsSL -O "https://github.com/maxischmaxi/browser-proxy/releases/latest/down
 sha256sum -c SHA256SUMS --ignore-missing   # or `shasum -a 256 -c` on macOS
 chmod +x "${ASSET}" && sudo mv "${ASSET}" /usr/local/bin/browser-proxy
 ```
+
+### Uninstall
+
+Installed via the **install script**? Undo it (this also unregisters
+browser-proxy as your default browser):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/browser-proxy/main/install.sh | sh -s -- uninstall
+```
+
+It deletes the `browser-proxy` binary from `/usr/local/bin` / `~/.local/bin`
+(or `$BROWSER_PROXY_DEST`), using `sudo` only if the directory isn't writable.
+Your config at `~/.config/browser-proxy/config.toml` is left untouched.
+
+**Switching to the AUR package?** Remove the script copy first, then install
+and re-register from the package-managed location:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/maxischmaxi/browser-proxy/main/install.sh | sh -s -- uninstall
+yay -S browser-proxy
+browser-proxy install      # re-register; the binary now lives at /usr/bin
+```
+
+Installed via a **package manager** instead? The install-script uninstall
+won't touch a package-managed binary. Unregister with `browser-proxy uninstall`
+(removes only the `.desktop` file / app bundle), then remove the package the
+usual way (e.g. `yay -R browser-proxy`).
 
 ## Build from source
 
