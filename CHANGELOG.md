@@ -5,6 +5,55 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-18
+
+### Added
+
+- **Linux source detection now survives the `gio` double-fork.** Electron apps
+  (Slack, Teams) open links by running `xdg-open`, which under GNOME becomes
+  `gio open`, and GLib double-forks the handler — so browser-proxy's parent was
+  `systemd --user` and the process chain back to the app was already gone. Every
+  `source = "Slack"` / `source = "Microsoft Teams"` rule silently never matched
+  for GNOME-launched apps, and those links fell through to `default`.
+  Detection now tries two signals in order and takes the first that yields
+  anything:
+  1. the parent process chain (as before), now also matching the basename of
+     `/proc/<pid>/exe` — the kernel truncates `comm` to 15 characters, so long
+     names such as `teams-for-linux` only survive in `exe`;
+  2. the **systemd app-scope name** (`app-slack-4711.scope`), which survives the
+     double fork because GLib spawns the handler in place and is derived from the
+     launching `.desktop` file and still identifies the app after it has exited.
+     Flatpak's reverse-DNS ids (`app-flatpak-com.slack.Slack-4711.scope`) are
+     understood, as are systemd's `\x2d` escaping and `@instance` units.
+- `source.Info` now carries a **candidate list** and a rule matches when any
+  candidate does. This preserves both `comm` and the executable basename for an
+  ancestor, and useful aliases such as `com.slack.Slack` and `Slack` for a scope.
+- `browser-proxy test -v [url]` prints every detection signal — cgroup path,
+  scope unit, the ancestor chain, scope-derived names, the candidates, and which
+  stage won. It works without a URL and without a config file.
+- Routing log lines now record *how* the source was attributed:
+  `source=slack (via scope)`.
+
+### Fixed
+
+- **The browser no longer inherits the calling app's systemd scope** (Linux).
+  browser-proxy is spawned inside the caller's scope — that is what makes cgroup
+  source detection work — and a browser started from there stayed in
+  `app-slack-<pid>.scope`, so quitting Slack killed it, and later clicks saw a
+  scope full of browser processes. Launches now go through
+  `systemd-run --user --scope --quiet`, putting the browser in a generated
+  transient scope of its own. Availability is probed before the detached launch;
+  it falls back to the previous direct exec when `systemd-run` or the user manager
+  is unavailable. The `.desktop`/`gio launch` path is untouched (the desktop environment already
+  starts those in their own scope).
+
+### Notes
+
+- Detection stays best-effort and never fails a click: unreadable `/proc` just
+  means no source. cgroup v2 (unified) and v1 (systemd hierarchy) layouts are both
+  handled from `/proc/self/cgroup`; the cgroup filesystem itself is not scanned.
+- Candidates remain Linux-only.
+
 ## [1.3.0] - 2026-06-09
 
 ### Added

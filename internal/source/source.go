@@ -1,13 +1,12 @@
 // Package source identifies the application that triggered a URL open.
 package source
 
-// Info describes the source application. Empty fields mean unknown/undetected.
-//
-//   - Name     human-readable name (macOS: localizedName; Linux: /proc comm)
-//   - BundleID macOS bundle identifier; always empty on Linux
+// Info describes the source application. Empty fields mean unknown.
 type Info struct {
-	Name     string
-	BundleID string
+	Name       string
+	BundleID   string
+	Candidates []string
+	Via        string
 }
 
-func (i Info) Empty() bool { return i.Name == "" && i.BundleID == "" }
+func (i Info) Empty() bool { return i.Name == "" && i.BundleID == "" && len(i.Candidates) == 0 }

@@ -41,7 +41,7 @@ func TestHostMatch(t *testing.T) {
 		"https://atlassian.net/":           "Firefox",
 		"https://example.com/foo":          "Brave",
 		"https://EXAMPLE.com/foo":          "Brave",
-		"https://www.example.com/foo":      "Brave",   // bare host matches www. variant
+		"https://www.example.com/foo":      "Brave", // bare host matches www. variant
 		"https://other.com/":               "Default",
 		"https://api.example.com/":         "Default", // www-fallback only, not all subdomains
 	}
@@ -148,6 +148,27 @@ func TestSourceOnlyRule(t *testing.T) {
 	}
 }
 
+func TestSourceMatchesAnyCandidate(t *testing.T) {
+	r := mustRouter(t, "Default",
+		Rule{Source: "teams-for-linux", Browser: "ChromeFromTeams"},
+	)
+	cases := []struct {
+		src  source.Info
+		want string
+	}{
+		{source.Info{Name: "teams-for-linux"}, "ChromeFromTeams"},
+		{source.Info{Name: "teams-for-linu", Candidates: []string{"teams-for-linu", "teams-for-linux"}}, "ChromeFromTeams"},
+		{source.Info{Name: "other", Candidates: []string{"other", "Teams-For-Linux"}}, "ChromeFromTeams"},
+		{source.Info{Name: "slack", Candidates: []string{"slack", "chrome_crashpad_handler"}}, "Default"},
+		{source.Info{}, "Default"},
+	}
+	for _, tc := range cases {
+		if got := r.Resolve("https://x.example/", tc.src); got.Browser != tc.want {
+			t.Errorf("Resolve(%+v) = %q, want %q", tc.src, got.Browser, tc.want)
+		}
+	}
+}
+
 func TestSourceByBundleID(t *testing.T) {
 	r := mustRouter(t, "Default",
 		Rule{Source: "com.tinyspeck.slackmacgap", Browser: "Chrome"},
@@ -158,6 +179,10 @@ func TestSourceByBundleID(t *testing.T) {
 	}
 	if got := r.Resolve("https://x.example/", source.Info{Name: "Slack"}); got.Browser != "Default" {
 		t.Errorf("bundle-id rule must not match by name, got %s", got.Browser)
+	}
+	flatpak := source.Info{Name: "com.tinyspeck.slackmacgap", Candidates: []string{"com.tinyspeck.slackmacgap"}}
+	if got := r.Resolve("https://x.example/", flatpak); got.Browser != "Chrome" {
+		t.Errorf("expected Chrome for a reverse-DNS candidate, got %s", got.Browser)
 	}
 }
 

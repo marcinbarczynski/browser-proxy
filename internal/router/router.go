@@ -61,17 +61,25 @@ func (r *Router) Resolve(rawURL string, src source.Info) Decision {
 	return Decision{Browser: r.Default, RuleIndex: -1}
 }
 
-// sourceMatches compares actual against want, treating dot-bearing strings as
-// macOS bundle-IDs and everything else as a human-readable name.
+// sourceMatches also accepts aliases collected by Linux source detection.
 func sourceMatches(actual source.Info, want string) bool {
 	w := strings.ToLower(strings.TrimSpace(want))
 	if w == "" {
 		return true
 	}
 	if isBundleIDLike(w) {
-		return strings.ToLower(actual.BundleID) == w
+		if strings.ToLower(actual.BundleID) == w {
+			return true
+		}
+	} else if strings.ToLower(actual.Name) == w {
+		return true
 	}
-	return strings.ToLower(actual.Name) == w
+	for _, c := range actual.Candidates {
+		if strings.ToLower(c) == w {
+			return true
+		}
+	}
+	return false
 }
 
 func isBundleIDLike(s string) bool {

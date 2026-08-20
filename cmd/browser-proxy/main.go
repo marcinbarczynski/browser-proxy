@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/maxischmaxi/browser-proxy/internal/browsers"
@@ -16,7 +17,7 @@ import (
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".
 // Local builds report this default; CI release builds report the git tag.
-var Version = "1.3.0"
+var Version = "1.4.0"
 
 const usage = `browser-proxy — route URLs to the right browser
 
@@ -28,9 +29,10 @@ Commands:
   install              Register as the system default browser
   uninstall            Unregister
   open <url>           Open <url> in the configured browser (called by the OS)
-  test [-source NAME] <url>
+  test [-source NAME] [-v] <url>
                        Print which browser/profile would be used (does not open anything)
                        -source overrides the auto-detected source app
+                       -v      show how the source app was detected (works without a url)
   profiles <browser>   List the profile names known by a Chromium- or
                        Firefox-family browser (use these as 'profile' in rules)
   daemon               Run the URL-event listener (macOS-internal; called from .app)
@@ -114,19 +116,14 @@ func cmdShowConfig() error {
 func cmdTest(args []string) error {
 	fs := flag.NewFlagSet("test", flag.ExitOnError)
 	srcOverride := fs.String("source", "", "simulate the source app (name or macOS bundle id)")
+	verbose := fs.Bool("v", false, "also print how the source app was detected")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	rest := fs.Args()
-	if len(rest) < 1 {
-		return errors.New("usage: browser-proxy test [-source NAME] <url>")
+	if len(rest) < 1 && !*verbose {
+		return errors.New("usage: browser-proxy test [-source NAME] [-v] <url>")
 	}
-
-	cfg, err := config.Load(config.DefaultPath())
-	if err != nil {
-		return err
-	}
-	defer cfg.Close()
 
 	src := source.Detect()
 	if *srcOverride != "" {
@@ -136,6 +133,20 @@ func cmdTest(args []string) error {
 			src = source.Info{Name: *srcOverride}
 		}
 	}
+
+	// Detection diagnostics do not require a config.
+	if *verbose {
+		printDetection(src, *srcOverride != "")
+	}
+	if len(rest) < 1 {
+		return nil // `test -v` with no URL: caller detection only
+	}
+
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		return err
+	}
+	defer cfg.Close()
 
 	originalURL := rest[0]
 	finalURL := cfg.Rewriter.Apply(originalURL)
@@ -167,6 +178,35 @@ func cmdTest(args []string) error {
 		fmt.Printf("%s   default — no rule matched   %s\n", target, srcLabel)
 	}
 	return nil
+}
+
+func printDetection(src source.Info, overridden bool) {
+	for _, l := range source.DebugLines() {
+		fmt.Println(l)
+	}
+	via := src.Via
+	switch {
+	case overridden:
+		via = "-source flag"
+	case src.Empty():
+		via = "nothing detected"
+	case via == "":
+		via = "platform"
+	}
+	sourceName := src.Name
+	if sourceName == "" {
+		sourceName = src.BundleID
+	}
+	fmt.Println("candidates:   " + orNone(strings.Join(src.Candidates, ", ")))
+	fmt.Printf("detected by:  %s  ->  source=%s\n", via, orNone(sourceName))
+	fmt.Println("---")
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
 }
 
 func dotNoSpace(s string) bool {
@@ -280,6 +320,9 @@ func route(rawURL string, src source.Info) error {
 	srcLabel := src.Name
 	if srcLabel == "" {
 		srcLabel = src.BundleID
+	}
+	if srcLabel != "" && src.Via != "" {
+		srcLabel += " (via " + src.Via + ")"
 	}
 	ruleDesc := ""
 	if d.MatchedRule() {

@@ -14,7 +14,7 @@ import (
 
 // Open launches the given browser with the URL, optionally targeting a profile.
 //   - browser ending in ".desktop"   → "gio launch <name>.desktop <url>"
-//                                      (profile is ignored, with a warning)
+//     (profile is ignored, with a warning)
 //   - Chromium-family + profile      → exec browser --profile-directory=<resolved> <url>
 //   - Firefox-family + profile       → exec browser -P <profile> --new-instance <url>
 //   - anything else                  → exec browser <url>
@@ -31,7 +31,26 @@ func Open(browser, profile, url string) error {
 
 	args := profileArgs(browser, profile)
 	args = append(args, url)
-	return runDetached(exec.Command(browser, args...), browser)
+	return runDetached(browserCommand(browser, args...), browser)
+}
+
+// browserCommand keeps the browser out of the calling app's systemd scope.
+// Desktop-file launches already receive their own scope through gio.
+func browserCommand(browser string, args ...string) *exec.Cmd {
+	browserPath, browserErr := exec.LookPath(browser)
+	if browserErr != nil {
+		return exec.Command(browser, args...)
+	}
+	systemdRun, err := exec.LookPath("systemd-run")
+	if err != nil {
+		return exec.Command(browserPath, args...)
+	}
+	// Probe before detaching so user-manager failures remain observable.
+	if err := exec.Command(systemdRun, "--user", "--scope", "--quiet", "true").Run(); err != nil {
+		return exec.Command(browserPath, args...)
+	}
+	full := append([]string{"--user", "--scope", "--quiet", "--", browserPath}, args...)
+	return exec.Command(systemdRun, full...)
 }
 
 func profileArgs(browser, profile string) []string {
@@ -42,8 +61,6 @@ func profileArgs(browser, profile string) []string {
 	case browsers.Chromium:
 		return []string{"--profile-directory=" + browsers.ResolveChromiumProfile(browser, profile)}
 	case browsers.Firefox:
-		// --new-instance is needed when Firefox is already running with another
-		// profile; otherwise -P would be silently ignored via Firefox's remoting.
 		return []string{"-P", profile, "--new-instance"}
 	default:
 		fmt.Fprintf(os.Stderr,
