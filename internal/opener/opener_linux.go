@@ -16,7 +16,7 @@ import (
 //   - browser ending in ".desktop"   → "gio launch <name>.desktop <url>"
 //     (profile is ignored, with a warning)
 //   - Chromium-family + profile      → exec browser --profile-directory=<resolved> <url>
-//   - Firefox-family + profile       → exec browser -P <profile> --new-instance <url>
+//   - Firefox-family + profile       → exec browser -P <profile> <url>
 //   - anything else                  → exec browser <url>
 func Open(browser, profile, url string) error {
 	if strings.HasSuffix(browser, ".desktop") {
@@ -61,7 +61,7 @@ func profileArgs(browser, profile string) []string {
 	case browsers.Chromium:
 		return []string{"--profile-directory=" + browsers.ResolveChromiumProfile(browser, profile)}
 	case browsers.Firefox:
-		return []string{"-P", profile, "--new-instance"}
+		return []string{"-P", profile}
 	default:
 		fmt.Fprintf(os.Stderr,
 			"warning: profile %q ignored: unknown browser family for %q "+

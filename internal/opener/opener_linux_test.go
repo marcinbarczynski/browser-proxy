@@ -9,6 +9,21 @@ import (
 	"testing"
 )
 
+func TestProfileArgsFirefoxKeepsRemoting(t *testing.T) {
+	got := profileArgs("firefox", "Work")
+	if want := []string{"-P", "Work"}; !equalArgs(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestProfileArgsFirefoxFamily(t *testing.T) {
+	for _, browser := range []string{"firefox", "/usr/bin/firefox", "librewolf", "waterfox"} {
+		if got, want := profileArgs(browser, "Work"), []string{"-P", "Work"}; !equalArgs(got, want) {
+			t.Errorf("profileArgs(%q) = %v, want %v", browser, got, want)
+		}
+	}
+}
+
 func equalArgs(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

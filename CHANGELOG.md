@@ -36,6 +36,9 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Linux Firefox profile launches keep remoting enabled.** Passing
+  `--new-instance` disabled remoting and made a second process contend for an
+  already-open profile. Plain `-P <name>` reaches an open profile or starts it.
 - **The browser no longer inherits the calling app's systemd scope** (Linux).
   browser-proxy is spawned inside the caller's scope — that is what makes cgroup
   source detection work — and a browser started from there stayed in
